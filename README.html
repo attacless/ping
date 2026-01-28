@@ -1,0 +1,1141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ping - Decentralized E2E Encrypted Messenger</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --text-muted: #6e7681; 
+            --accent-blue: #90FE8E; /* #58a6ff */
+            --accent-green: #3fb950;
+            --accent-purple: #a371f7;
+            --accent-orange: #d29922;
+            --accent-red: #f85149;
+            --border-color: #30363d;
+            --code-bg: #1a1f26;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 40px 0;
+            border-bottom: 1px solid var(--border-color);
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            color: var(--text-primary);
+        }
+
+        .header h1 .emoji {
+            margin-right: 10px;
+        }
+
+        .tagline {
+            font-size: 1.2em;
+            color: var(--accent-blue);
+            margin-bottom: 20px;
+        }
+
+        .subtitle {
+            color: var(--text-secondary);
+            font-style: italic;
+            margin-bottom: 20px;
+        }
+
+        /* Badges */
+        .badges {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+
+        .badge-blue { background: #1f6feb; color: white; }
+        .badge-purple { background: #8957e5; color: white; }
+        .badge-green { background: #238636; color: white; }
+        .badge-orange { background: #9e6a03; color: white; }
+
+        /* Screenshot placeholder */
+        .screenshot-placeholder {
+            background: var(--bg-secondary);
+            border: 2px dashed var(--border-color);
+            border-radius: 10px;
+            padding: 60px 20px;
+            text-align: center;
+            color: var(--text-muted);
+            margin: 20px 0;
+        }
+
+        /* Sections */
+        section {
+            margin-bottom: 50px;
+        }
+
+        h2 {
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary);
+        }
+
+        h2 .emoji {
+            margin-right: 10px;
+        }
+
+        h3 {
+            font-size: 1.3em;
+            margin: 25px 0 15px 0;
+            color: var(--text-primary);
+        }
+
+        h3 .emoji {
+            margin-right: 8px;
+        }
+
+        p {
+            margin-bottom: 15px;
+            color: var(--text-secondary);
+        }
+
+        /* Feature Grid */
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .feature-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 25px;
+        }
+
+        .feature-card h3 {
+            margin-top: 0;
+            color: var(--accent-blue);
+        }
+
+        .feature-card ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .feature-card li {
+            padding: 8px 0;
+            color: var(--text-secondary);
+            border-bottom: 1px solid var(--bg-tertiary);
+        }
+
+        .feature-card li:last-child {
+            border-bottom: none;
+        }
+
+        .feature-card li strong {
+            color: var(--text-primary);
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            background: var(--bg-secondary);
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        td {
+            color: var(--text-secondary);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover {
+            background: var(--bg-tertiary);
+        }
+
+        /* Code blocks */
+        pre {
+            background: var(--code-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+
+        code {
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9em;
+            color: var(--accent-green);
+        }
+
+        pre code {
+            color: var(--text-primary);
+        }
+
+        .comment {
+            color: var(--text-muted);
+        }
+
+        /* Inline code */
+        p code, td code, li code {
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.85em;
+        }
+
+        /* Alerts/Notes */
+        .note {
+            background: rgba(56, 139, 253, 0.1);
+            border: 1px solid rgba(56, 139, 253, 0.4);
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin: 20px 0;
+        }
+
+        .note strong {
+            color: var(--accent-blue);
+        }
+
+        .warning {
+            background: rgba(210, 153, 34, 0.1);
+            border: 1px solid rgba(210, 153, 34, 0.4);
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin: 20px 0;
+        }
+
+        .warning strong {
+            color: var(--accent-orange);
+        }
+
+        /* Diagram */
+        .diagram {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 30px;
+            margin: 20px 0;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 0.85em;
+            line-height: 1.4;
+            overflow-x: auto;
+            white-space: pre;
+            color: var(--text-secondary);
+        }
+
+        /* Command reference table */
+        .command-table td:first-child {
+            white-space: nowrap;
+        }
+
+        .command-table code {
+            color: var(--accent-green);
+        }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 40px 0;
+            border-top: 1px solid var(--border-color);
+            margin-top: 50px;
+        }
+
+        .footer-links {
+            margin-bottom: 20px;
+        }
+
+        .footer-links a {
+            color: var(--accent-blue);
+            text-decoration: none;
+            margin: 0 15px;
+        }
+
+        .footer-links a:hover {
+            text-decoration: underline;
+        }
+
+        .footer-sub {
+            color: var(--text-muted);
+            font-size: 0.9em;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            body {
+                padding: 15px;
+            }
+
+            .header h1 {
+                font-size: 1.8em;
+            }
+
+            .feature-grid {
+                grid-template-columns: 1fr;
+            }
+
+            table {
+                font-size: 0.85em;
+            }
+
+            th, td {
+                padding: 8px 10px;
+            }
+
+            pre {
+                padding: 12px;
+                font-size: 0.8em;
+            }
+        }
+
+        /* Links */
+        a {
+            color: var(--accent-blue);
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        /* Lists */
+        ul, ol {
+            margin: 15px 0;
+            padding-left: 25px;
+            color: var(--text-secondary);
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+
+        /* Horizontal rule */
+        hr {
+            border: none;
+            border-top: 1px solid var(--border-color);
+            margin: 40px 0;
+        }
+
+        /* Table of Contents */
+        .toc {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 25px 30px;
+            margin: 30px 0;
+        }
+
+        .toc h3 {
+            margin-bottom: 15px;
+            color: var(--text-primary);
+            font-size: 1.1em;
+        }
+
+        .toc-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px 30px;
+        }
+
+        .toc a {
+            display: block;
+            padding: 5px 0;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.95em;
+            transition: color 0.2s;
+        }
+
+        .toc a:hover {
+            color: var(--accent-blue);
+        }
+
+        .toc a .emoji {
+            margin-right: 8px;
+        }
+
+        /* Message Flow Steps */
+        .flow-step {
+            background: var(--bg-secondary);
+            border-left: 3px solid var(--accent-blue);
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .flow-step-number {
+            display: inline-block;
+            background: var(--accent-blue);
+            color: var(--bg-primary);
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            text-align: center;
+            line-height: 24px;
+            font-weight: bold;
+            font-size: 0.85em;
+            margin-right: 10px;
+        }
+
+        .flow-step h4 {
+            display: inline;
+            color: var(--text-primary);
+            font-size: 1em;
+        }
+
+        .flow-step p {
+            margin: 10px 0 0 34px;
+            color: var(--text-secondary);
+            font-size: 0.9em;
+        }
+
+        /* Algorithm Summary */
+        .algo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .algo-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px 20px;
+        }
+
+        .algo-card h4 {
+            color: var(--accent-blue);
+            font-size: 0.9em;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .algo-card code {
+            color: var(--text-primary);
+            font-size: 1em;
+        }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+    <h1><span class="emoji">🏓</span>Ping</h1>
+    <p class="tagline">Decentralized End-to-End Encrypted Messenger</p>
+    
+    <div class="badges">
+        <span class="badge badge-blue">Python 3.12+</span>
+        <span class="badge badge-purple">ANSI Terminal</span>
+        <span class="badge badge-green">E2E Encrypted</span>
+        <span class="badge badge-orange">Nostr Relays</span>
+    </div>
+    
+    <p class="subtitle">Serverless, Trustless, Attacless Private Messaging.</p>
+    
+    <!-- Screenshot placeholder -->
+    <div class="screenshot-placeholder">
+        📸 Screenshot placeholder — Add demo.png here
+    </div>
+</header>
+
+<!-- Table of Contents -->
+<nav class="toc">
+    <h3>📑 Table of Contents</h3>
+    <div class="toc-grid">
+        <a href="#features"><span class="emoji">✨</span>Features</a>
+        <a href="#security"><span class="emoji">🛡️</span>Security</a>
+        <a href="#installation"><span class="emoji">📦</span>Installation</a>
+        <a href="#usage"><span class="emoji">🚀</span>Usage</a>
+        <a href="#themes"><span class="emoji">🎨</span>Themes</a>
+        <a href="#identity"><span class="emoji">💾</span>Identity Management</a>
+        <a href="#updates"><span class="emoji">🔄</span>Updates</a>
+        <a href="#mobile"><span class="emoji">📱</span>Mobile Usage</a>
+        <a href="#how-it-works"><span class="emoji">🌐</span>How It Works</a>
+        <a href="#contributing"><span class="emoji">🤝</span>Contributing</a>
+        <a href="#license"><span class="emoji">📄</span>License</a>
+        <a href="#acknowledgments"><span class="emoji">🙏</span>Acknowledgments</a>
+    </div>
+</nav>
+
+<!-- Features -->
+<section id="features">
+    <h2><span class="emoji">✨</span>Features</h2>
+    
+    <div class="feature-grid">
+        <div class="feature-card">
+            <h3>🔒 Privacy First</h3>
+            <ul>
+                <li><strong>End-to-end encryption</strong> with X25519 + ChaCha20-Poly1305</li>
+                <li><strong>Ephemeral chat sessions</strong> new keys each session by default</li>
+                <li><strong>No accounts</strong> no email, no phone, no registration</li>
+                <li><strong>No metadata</strong> encrypted envelopes hide message patterns</li>
+            </ul>
+        </div>
+        
+        <div class="feature-card">
+            <h3>🌐 Truly Decentralized</h3>
+            <ul>
+                <li><strong>Nostr protocol</strong> censorship-resistant relay network</li>
+                <li><strong>No central server</strong> messages route through public relays</li>
+                <li><strong>Works offline-first</strong> reconnects automatically</li>
+                <li><strong>Self-hosted option</strong> run your own relay</li>
+            </ul>
+        </div>
+        
+        <div class="feature-card">
+            <h3>💬 Features</h3>
+            <ul>
+                <li><strong>Room based</strong> group chats</li>
+                <li><strong>Direct messages</strong> between peers</li>
+                <li><strong>Password-protected</strong> rooms</li>
+                <li><strong>Invite codes</strong> with QR generation</li>
+                <li><strong>Sound notifications</strong> with mention detection</li>
+            </ul>
+        </div>
+        
+        <div class="feature-card">
+            <h3>🎨 Customizable</h3>
+            <ul>
+                <li><strong>20+ color themes</strong> (matrix, tron, amber, etc.)</li>
+                <li><strong>Custom colors</strong> set any bg/fg combination</li>
+                <li><strong>Portable</strong> single Python file, no install needed</li>
+                <li><strong>Cross-platform</strong> Linux, macOS, Windows, mobile</li>
+            </ul>
+        </div>
+    </div>
+</section>
+
+<hr>
+
+<!-- Security -->
+<section id="security">
+    <h2><span class="emoji">🛡️</span>Security</h2>
+    
+    <p>Ping uses a modern cryptographic stack:</p>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Layer</th>
+                <th>Algorithm</th>
+                <th>Purpose</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>Key Exchange</td>
+                <td><strong>X25519 ECDH</strong></td>
+                <td>Derive shared secrets</td>
+            </tr>
+            <tr>
+                <td>Encryption</td>
+                <td><strong>ChaCha20-Poly1305</strong></td>
+                <td>Authenticated encryption</td>
+            </tr>
+            <tr>
+                <td>Key Derivation</td>
+                <td><strong>HKDF-SHA256</strong></td>
+                <td>Expand shared secret</td>
+            </tr>
+            <tr>
+                <td>Nostr Identity</td>
+                <td><strong>secp256k1 Schnorr</strong></td>
+                <td>Sign Nostr events</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <h3>Privacy Modes</h3>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Mode</th>
+                <th>Flag</th>
+                <th>Protection Level</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Default</strong></td>
+                <td><code>—</code></td>
+                <td>Encrypted envelopes + ephemeral Nostr keys</td>
+            </tr>
+            <tr>
+                <td><strong>Hardened</strong></td>
+                <td><code>--hardened</code></td>
+                <td>Default + decoy traffic + timing jitter</td>
+            </tr>
+            <tr>
+                <td><strong>Legacy</strong></td>
+                <td><code>--legacy</code></td>
+                <td>E2E encryption only</td>
+            </tr>
+        </tbody>
+    </table>
+</section>
+
+<hr>
+
+<!-- Installation -->
+<section id="installation">
+    <h2><span class="emoji">📦</span>Installation</h2>
+    
+    <h3>Prerequisites</h3>
+    <ul>
+        <li>Python 3.12 or higher</li>
+        <li>pip (Python package manager)</li>
+    </ul>
+    
+    <h3>Quick Install</h3>
+    
+    <pre><code><span class="comment"># Clone the repository</span>
+git clone https://github.com/yourusername/ping-e2e.git
+cd ping-e2e
+
+<span class="comment"># Install dependencies</span>
+pip install cryptography websockets certifi
+
+<span class="comment"># Optional: faster crypto (recommended)</span>
+pip install secp256k1
+<span class="comment"># or</span>
+pip install coincurve
+
+<span class="comment"># Optional: QR code generation</span>
+pip install qrcode</code></pre>
+    
+    <h3>One-Line Install</h3>
+    
+    <pre><code>curl -O https://raw.githubusercontent.com/attacless/ping/main/ping.py && pip install cryptography websockets certifi && python ping.py</code></pre>
+    
+    <h3>Dependencies</h3>
+    
+    <table>
+        <thead>
+            <tr>
+                <th>Package</th>
+                <th>Required</th>
+                <th>Purpose</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>cryptography</code></td>
+                <td>✅ Yes</td>
+                <td>X25519, ChaCha20-Poly1305, HKDF</td>
+            </tr>
+            <tr>
+                <td><code>websockets</code></td>
+                <td>✅ Yes</td>
+                <td>Nostr relay connections</td>
+            </tr>
+            <tr>
+                <td><code>certifi</code></td>
+                <td>✅ Yes</td>
+                <td>SSL certificates</td>
+            </tr>
+            <tr>
+                <td><code>secp256k1</code></td>
+                <td>⭐ Recommended</td>
+                <td>Fast Schnorr signatures</td>
+            </tr>
+            <tr>
+                <td><code>coincurve</code></td>
+                <td>🔄 Alternative</td>
+                <td>Schnorr signatures</td>
+            </tr>
+            <tr>
+                <td><code>qrcode</code></td>
+                <td>📱 Optional</td>
+                <td>QR invite codes</td>
+            </tr>
+        </tbody>
+    </table>
+    
+    <div class="note">
+        <strong>Note:</strong> If neither <code>secp256k1</code> nor <code>coincurve</code> is installed, Ping falls back to a pure Python implementation (slower but works everywhere).
+    </div>
+</section>
+
+<hr>
+
+<!-- Usage -->
+<section id="usage">
+    <h2><span class="emoji">🚀</span>Usage</h2>
+    
+    <h3>Basic Usage</h3>
+    
+    <pre><code><span class="comment"># Start Ping (interactive mode)</span>
+python ping.py
+
+<span class="comment"># Join a room directly</span>
+python ping.py -r myroom
+
+<span class="comment"># Join a password-protected room</span>
+python ping.py -r secretroom -p mypassword
+
+<span class="comment"># Join via invite code</span>
+python ping.py -i ping1eyJyIjoibXlyb29tIn0</code></pre>
+    
+    <h3>Command Line Options</h3>
+    
+    <pre><code>python ping.py [OPTIONS]
+
+Options:
+  -r, --room ROOM       Join a room on startup
+  -p, --password PASS   Room password
+  -i, --invite CODE     Join via invite code
+  -u, --username NAME   Set your display name
+  -c, --color THEME     Set color theme (e.g., matrix, tron)
+  -l, --load            Load identity from pingconfig.json
+  --persist             Persistent mode (save to ~/.ping-data)
+  --legacy              Legacy mode (compatible with old clients)
+  --hardened            Hardened privacy mode
+  --no-sound            Disable sound notifications
+  --update              Check for and install updates
+  -d, --debug           Show debug output
+  -v, --version         Show version</code></pre>
+    
+    <h3>Chat Commands</h3>
+    
+    <p>Once inside Ping, use these commands:</p>
+    
+    <table class="command-table">
+        <thead>
+            <tr>
+                <th>Category</th>
+                <th>Command</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td rowspan="5"><strong>Room</strong></td>
+                <td><code>/join &lt;room&gt; [pass]</code></td>
+                <td>Join a room (with optional password)</td>
+            </tr>
+            <tr>
+                <td><code>/leave</code></td>
+                <td>Leave current room</td>
+            </tr>
+            <tr>
+                <td><code>/invite</code></td>
+                <td>Generate invite code + QR</td>
+            </tr>
+            <tr>
+                <td><code>/peers</code></td>
+                <td>Show connected peers</td>
+            </tr>
+            <tr>
+                <td><code>/reconnect</code></td>
+                <td>Reconnect to relays</td>
+            </tr>
+            <tr>
+                <td rowspan="2"><strong>Chat</strong></td>
+                <td><code>/dm &lt;user&gt; &lt;msg&gt;</code></td>
+                <td>Send direct message</td>
+            </tr>
+            <tr>
+                <td><code>/name &lt;username&gt;</code></td>
+                <td>Change display name</td>
+            </tr>
+            <tr>
+                <td rowspan="4"><strong>View</strong></td>
+                <td><code>/info</code></td>
+                <td>Show session info</td>
+            </tr>
+            <tr>
+                <td><code>/relays</code></td>
+                <td>Show relay status</td>
+            </tr>
+            <tr>
+                <td><code>/printsession</code></td>
+                <td>Show encryption keys</td>
+            </tr>
+            <tr>
+                <td><code>/clear</code></td>
+                <td>Clear screen</td>
+            </tr>
+            <tr>
+                <td rowspan="2"><strong>Config</strong></td>
+                <td><code>/color [theme]</code></td>
+                <td>Set colors (<code>/color themes</code> for list)</td>
+            </tr>
+            <tr>
+                <td><code>/sound [on|off]</code></td>
+                <td>Toggle sound notifications</td>
+            </tr>
+            <tr>
+                <td rowspan="4"><strong>Data</strong></td>
+                <td><code>/save</code></td>
+                <td>Export user session to pingconfig.json</td>
+            </tr>
+            <tr>
+                <td><code>/load</code></td>
+                <td>Import user session from pingconfig.json</td>
+            </tr>
+            <tr>
+                <td><code>/update</code></td>
+                <td>Check for updates</td>
+            </tr>
+            <tr>
+                <td><code>/wipe</code></td>
+                <td>Delete all local data</td>
+            </tr>
+            <tr>
+                <td><strong>Exit</strong></td>
+                <td><code>/quit</code></td>
+                <td>Exit Ping</td>
+            </tr>
+        </tbody>
+    </table>
+</section>
+
+<hr>
+
+<!-- Themes -->
+<section id="themes">
+    <h2><span class="emoji">🎨</span>Themes</h2>
+    
+    <p>Ping includes 20+ built-in color themes:</p>
+    
+    <pre><code><span class="comment"># Apply a theme</span>
+/color matrix      <span class="comment"># Green on black (hacker style)</span>
+/color tron        <span class="comment"># Cyan on black</span>
+/color amber       <span class="comment"># Yellow on black (CRT monitor)</span>
+/color ocean       <span class="comment"># Cyan on blue</span>
+
+<span class="comment"># Custom colors</span>
+/color blue white  <span class="comment"># Blue background, white text</span>
+/color - lgreen    <span class="comment"># Keep background, light green text</span>
+
+<span class="comment"># Reset to default</span>
+/color reset</code></pre>
+    
+    <!-- Theme screenshots placeholder -->
+    <div class="screenshot-placeholder">
+        📸 Theme screenshots placeholder — Add theme previews here
+    </div>
+    
+    <p><strong>Available themes:</strong> <code>matrix</code>, <code>tron</code>, <code>classic</code>, <code>amber</code>, <code>light</code>, <code>ocean</code>, <code>sunset</code>, <code>grape</code>, <code>snow</code>, <code>midnight</code>, <code>coffee</code>, and more.</p>
+</section>
+
+<hr>
+
+<!-- Session Management -->
+<section id="identity">
+    <h2><span class="emoji">💾</span>Session Management</h2>
+    
+    <p>By default, Ping runs in <strong>ephemeral mode</strong> a new keyset is generated each session for maximum privacy.</p>
+    
+    <h3>Saving Your Keys</h3>
+    
+    <pre><code><span class="comment"># Save current user session to pingconfig.json</span>
+/save
+
+<span class="comment"># Load user on next run</span>
+python ping.py --load</code></pre>
+    
+    <h3>Persistent Mode</h3>
+    
+    <pre><code><span class="comment"># Always use the same user session (stored in ~/.ping-data)</span>
+python ping.py --persist</code></pre>
+    
+    <h3>Config File Format</h3>
+    
+    <p>The <code>pingconfig.json</code> file contains your user session keys:</p>
+    
+    <pre><code>{
+  "version": 1,
+  "identity": {
+    "nostr_private_key": "base64...",
+    "nostr_public_key": "hex...",
+    "npub": "npub1...",
+    "encryption_private_key": "base64...",
+    "encryption_public_key": "base64...",
+    "ping_id": "abcd1234",
+    "created_at": 1234567890
+  },
+  "username": "cosmic-wolf-123",
+  "exported_at": 1234567890
+}</code></pre>
+    
+    <div class="warning">
+        <strong>⚠️ Keep this file secure!</strong> Anyone with access to it can impersonate you.
+    </div>
+</section>
+
+<hr>
+
+<!-- Updates -->
+<section id="updates">
+    <h2><span class="emoji">🔄</span>Updates</h2>
+    
+    <p>Ping can update itself:</p>
+    
+    <pre><code><span class="comment"># From command line</span>
+python ping.py --update
+
+<span class="comment"># From within Ping</span>
+/update</code></pre>
+    
+    <p>After updating, you'll be prompted to restart automatically.</p>
+</section>
+
+<hr>
+
+<!-- Mobile -->
+<section id="mobile">
+    <h2><span class="emoji">📱</span>Ping on Mobile</h2>
+    
+    <p>Ping works great on mobile terminal apps like <strong>Termux</strong> (Android) or <strong>a-Shell mini</strong> (iOS):</p>
+    
+    <pre><code><span class="comment"># Install on Termux</span>
+pkg install python
+pip install cryptography websockets certifi
+curl -O https://raw.githubusercontent.com/attacless/ping/main/ping.py
+python ping.py</code></pre>
+    
+    <div class="note">
+        <strong>Tip:</strong> Use <code>--no-sound</code> if terminal bells are annoying on mobile.
+    </div>
+</section>
+
+<hr>
+
+<!-- How It Works -->
+<section id="how-it-works">
+    <h2><span class="emoji">🌐</span>How It Works</h2>
+    
+    <p>Ping uses the Nostr protocol for decentralized message relay, with end-to-end encryption ensuring only the intended recipients can read messages.</p>
+    
+    <h3>Architecture Overview</h3>
+    
+    <div class="diagram">┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│   Alice     │     │   Nostr     │     │    Bob      │
+│  (ping.py)  │────▶│   Relays    │◀────│  (ping.py)  │
+└─────────────┘     └─────────────┘     └─────────────┘
+       │                   │                   │
+       │   1. Key Exchange (signed, public)    │
+       │◀─────────────────────────────────────▶│
+       │                                       │
+       │   2. Encrypted Messages (E2E)         │
+       │◀══════════════════════════════════════▶│
+       │   (Only Alice & Bob can decrypt)      │</div>
+    
+    <h3>Complete Message Flow</h3>
+    
+    <p>When Alice sends a message to Bob, here's exactly what happens:</p>
+    
+    <div class="flow-step">
+        <span class="flow-step-number">1</span>
+        <h4>Create Message Payload</h4>
+        <p>Alice's message is packaged with metadata: content, timestamp, username, and a unique ID.</p>
+    </div>
+    
+    <div class="flow-step">
+        <span class="flow-step-number">2</span>
+        <h4>ECDH Key Agreement</h4>
+        <p>Alice combines her X25519 private key with Bob's public key to derive a shared secret. Bob can compute the same secret using his private key + Alice's public key.</p>
+    </div>
+    
+    <div class="flow-step">
+        <span class="flow-step-number">3</span>
+        <h4>Key Derivation (HKDF)</h4>
+        <p>The shared secret is expanded using HKDF-SHA256 with the info string <code>ping-nostr-chacha20poly1305-v1</code> to produce the encryption key.</p>
+    </div>
+    
+    <div class="flow-step">
+        <span class="flow-step-number">4</span>
+        <h4>Message Padding</h4>
+        <p>The message is padded to a fixed bucket size (256, 512, 1024, 2048, 4096, or 8192 bytes) to hide its actual length from observers.</p>
+    </div>
+    
+    <div class="flow-step">
+        <span class="flow-step-number">5</span>
+        <h4>Authenticated Encryption</h4>
+        <p>ChaCha20-Poly1305 encrypts the padded message with a random 12-byte nonce. The Poly1305 tag ensures integrity and authenticity.</p>
+    </div>
+    
+    <div class="flow-step">
+        <span class="flow-step-number">6</span>
+        <h4>Create Nostr Event</h4>
+        <p>The ciphertext is wrapped in a Nostr event (kind 4242) with room tag and recipient's pubkey in the tags.</p>
+    </div>
+    
+    <div class="flow-step">
+        <span class="flow-step-number">7</span>
+        <h4>Sign &amp; Broadcast</h4>
+        <p>Alice signs the event with her secp256k1 key (BIP-340 Schnorr) and publishes to all connected relays.</p>
+    </div>
+    
+    <div class="flow-step">
+        <span class="flow-step-number">8</span>
+        <h4>Relay Distribution</h4>
+        <p>Nostr relays broadcast the event to all subscribers of that room tag. Relays see only ciphertext.</p>
+    </div>
+    
+    <div class="flow-step">
+        <span class="flow-step-number">9</span>
+        <h4>Receive &amp; Verify</h4>
+        <p>Bob receives the event, verifies the Schnorr signature, and checks the <code>["p"]</code> tag matches his pubkey.</p>
+    </div>
+    
+    <div class="flow-step">
+        <span class="flow-step-number">10</span>
+        <h4>Decrypt &amp; Display</h4>
+        <p>Bob derives the same shared secret, decrypts with ChaCha20-Poly1305, removes padding, and displays the message.</p>
+    </div>
+    
+    <h3>Algorithm Summary</h3>
+    
+    <div class="algo-grid">
+        <div class="algo-card">
+            <h4>Key Agreement</h4>
+            <code>X25519 (Curve25519 ECDH)</code>
+        </div>
+        <div class="algo-card">
+            <h4>Key Derivation</h4>
+            <code>HKDF-SHA256</code>
+        </div>
+        <div class="algo-card">
+            <h4>Encryption</h4>
+            <code>ChaCha20-Poly1305 (AEAD)</code>
+        </div>
+        <div class="algo-card">
+            <h4>Nostr Signing</h4>
+            <code>BIP-340 Schnorr (secp256k1)</code>
+        </div>
+        <div class="algo-card">
+            <h4>Hashing</h4>
+            <code>SHA-256</code>
+        </div>
+        <div class="algo-card">
+            <h4>Transport</h4>
+            <code>WebSocket (WSS/TLS)</code>
+        </div>
+    </div>
+    
+    <h3>Data Flow Summary</h3>
+    
+    <div class="diagram">Plaintext → Pad → ChaCha20-Poly1305 → Base64 → JSON → Nostr Event → Sign → Relay
+                              ▲
+                              │
+                  HKDF(X25519(my_priv, their_pub))</div>
+    
+    <p>See <a href="PROTOCOL">PROTOCOL</a> for the complete technical specification including privacy envelope structure, event kinds, and security properties.</p>
+</section>
+
+<hr>
+
+<!-- Contributing -->
+<section id="contributing">
+    <h2><span class="emoji">🤝</span>Contributing</h2>
+    
+    <p>Contributions are welcome! Please feel free to submit issues and pull requests.</p>
+    
+    <pre><code><span class="comment"># Fork and clone</span>
+git clone https://github.com/attacless/ping.git
+
+<span class="comment"># Make changes</span>
+# ...
+
+<span class="comment"># Test</span>
+python ping.py -d  <span class="comment"># Debug mode</span>
+
+<span class="comment"># Submit PR</span></code></pre>
+</section>
+
+<hr>
+
+<!-- License -->
+<section id="license">
+    <h2><span class="emoji">📄</span>License</h2>
+    
+    <p>AGPLv3 License see <a href="LICENSE">LICENSE</a> for details.</p>
+</section>
+
+<hr>
+
+<!-- Acknowledgments -->
+<section id="acknowledgments">
+    <h2><span class="emoji">🙏</span>Acknowledgments</h2>
+    
+    <ul>
+        <li>Satoshi Nakamoto</li>
+        <li>Nostr protocol</li>
+        <li>Attacless Angels</li>
+        <li>Public relay operators</li>
+    </ul>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+    <div class="footer-links">
+        <a href="https://raw.githubusercontent.com/attacless/ping/main">Website</a>
+        <a href="https://github.com/attacless/ping/issues">Report Bug</a>
+        <a href="https://github.com/attacless/ping/issues">Request Feature</a>
+    </div>
+    <p class="footer-sub">Built with a cypherpunk ethos.</p>
+    <p class="footer-sub">🏓</p>
+
+
+</footer>
+
+</body>
+</html>

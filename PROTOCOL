@@ -1,0 +1,714 @@
+# Ping Protocol Scheme
+
+## Overview
+
+Ping is a decentralized end-to-end encrypted messaging system built on top of the Nostr protocol. This document explains the complete cryptographic flow from connection to message delivery.
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              NOSTR RELAY NETWORK                                │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │
+│  │ relay.damus │  │   nos.lol   │  │ relay.snort │  │  nostr.mom  │   ...      │
+│  │     .io     │  │             │  │   .social   │  │             │            │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘            │
+│         │                │                │                │                    │
+│         └────────────────┴────────────────┴────────────────┘                    │
+│                                   │                                             │
+│                          ┌───────┴───────┐                                      │
+│                          │   WebSocket   │                                      │
+│                          │  Connections  │                                      │
+│                          └───────┬───────┘                                      │
+└──────────────────────────────────┼──────────────────────────────────────────────┘
+                                   │
+                    ┌──────────────┴──────────────┐
+                    │                             │
+                    ▼                             ▼
+           ┌───────────────┐             ┌───────────────┐
+           │    ALICE      │             │     BOB       │
+           │   (ping.py)   │             │   (ping.py)   │
+           │               │             │               │
+           │ ┌───────────┐ │             │ ┌───────────┐ │
+           │ │  Nostr    │ │             │ │  Nostr    │ │
+           │ │  Keys     │ │             │ │  Keys     │ │
+           │ │ (secp256k1)│ │             │ │ (secp256k1)│ │
+           │ └───────────┘ │             │ └───────────┘ │
+           │ ┌───────────┐ │             │ ┌───────────┐ │
+           │ │ Encryption│ │             │ │ Encryption│ │
+           │ │   Keys    │ │             │ │   Keys    │ │
+           │ │ (X25519)  │ │             │ │ (X25519)  │ │
+           │ └───────────┘ │             │ └───────────┘ │
+           └───────────────┘             └───────────────┘
+```
+
+---
+
+## Key Types
+
+Ping uses **two separate key pairs** for different purposes:
+
+### 1. Nostr Identity Keys (secp256k1)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    NOSTR IDENTITY (secp256k1)                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Private Key (32 bytes)                                         │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ nsec1abc123...                                          │   │
+│  │ Used for: Signing Nostr events                          │   │
+│  │ Never shared!                                           │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                           │                                     │
+│                           ▼ Derive                              │
+│  Public Key (32 bytes, x-only)                                  │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ npub1xyz789...                                          │   │
+│  │ Used for: Identifying user on Nostr                     │   │
+│  │ Shared publicly                                         │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  Purpose: Sign events so relays can verify authenticity         │
+│  Algorithm: BIP-340 Schnorr signatures                          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 2. Encryption Keys (X25519)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    ENCRYPTION KEYS (X25519)                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Private Key (32 bytes)                                         │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ [random 32 bytes]                                       │   │
+│  │ Used for: ECDH key agreement                            │   │
+│  │ Never shared!                                           │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                           │                                     │
+│                           ▼ Derive                              │
+│  Public Key (32 bytes)                                          │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │ [JWK format in key exchange]                            │   │
+│  │ Used for: Recipients encrypt messages to this key       │   │
+│  │ Shared via key exchange event                           │   │
+│  └─────────────────────────────────────────────────────────┘   │
+│                                                                 │
+│  Purpose: Derive shared secrets for E2E encryption              │
+│  Algorithm: X25519 Elliptic Curve Diffie-Hellman               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Connection Flow
+
+### Phase 1: Room Join
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           PHASE 1: ROOM JOIN                                    │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  ALICE                           RELAYS                              BOB
+    │                               │                                  │
+    │  1. Connect WebSocket         │                                  │
+    │──────────────────────────────▶│                                  │
+    │                               │                                  │
+    │  2. Subscribe to room tag     │                                  │
+    │   ["REQ", "sub1", {           │                                  │
+    │     "kinds": [4242-4246],     │                                  │
+    │     "#r": ["room_tag_hash"]   │                                  │
+    │   }]                          │                                  │
+    │──────────────────────────────▶│                                  │
+    │                               │                                  │
+    │                               │◀─────────────────────────────────│
+    │                               │  (Bob already subscribed)        │
+    │                               │                                  │
+
+
+  Room Tag Derivation:
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                                                                 │
+  │   room_id = "myroom"                                            │
+  │                     │                                           │
+  │                     ▼                                           │
+  │   room_tag = SHA256(room_id)[:16].hex()                        │
+  │            = "fe08571d5b874dda..."  (32 hex chars)             │
+  │                                                                 │
+  │   If password protected:                                        │
+  │   room_tag = SHA256(room_id + ":" + password)[:16].hex()       │
+  │                                                                 │
+  └─────────────────────────────────────────────────────────────────┘
+```
+
+### Phase 2: Presence Announcement
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        PHASE 2: PRESENCE ANNOUNCEMENT                           │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  ALICE                           RELAYS                              BOB
+    │                               │                                  │
+    │  3. Publish PRESENCE event    │                                  │
+    │   (kind: 4244)                │                                  │
+    │  ┌─────────────────────────┐  │                                  │
+    │  │ {                       │  │                                  │
+    │  │   "kind": 4244,         │  │                                  │
+    │  │   "pubkey": "alice_pk", │  │                                  │
+    │  │   "tags": [             │  │                                  │
+    │  │     ["r", "room_tag"]   │  │                                  │
+    │  │   ],                    │  │                                  │
+    │  │   "content": {          │  │                                  │
+    │  │     "username": "alice",│  │                                  │
+    │  │     "ping_id": "abc123" │  │                                  │
+    │  │   },                    │  │                                  │
+    │  │   "sig": "schnorr_sig"  │  │                                  │
+    │  │ }                       │  │                                  │
+    │  └─────────────────────────┘  │                                  │
+    │──────────────────────────────▶│                                  │
+    │                               │  4. Relay broadcasts to          │
+    │                               │     room subscribers             │
+    │                               │─────────────────────────────────▶│
+    │                               │                                  │
+    │                               │  Bob sees: "Alice joined"        │
+    │                               │                                  │
+```
+
+### Phase 3: Key Exchange
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          PHASE 3: KEY EXCHANGE                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  ALICE                           RELAYS                              BOB
+    │                               │                                  │
+    │  5. Publish KEY_EXCHANGE      │                                  │
+    │   (kind: 4243)                │                                  │
+    │  ┌─────────────────────────┐  │                                  │
+    │  │ {                       │  │                                  │
+    │  │   "kind": 4243,         │  │                                  │
+    │  │   "content": {          │  │                                  │
+    │  │     "username": "alice",│  │                                  │
+    │  │     "encryption_pubkey":│◀─┼── Alice's X25519 public key     │
+    │  │       { "kty": "OKP",   │  │   (JWK format)                   │
+    │  │         "crv": "X25519",│  │                                  │
+    │  │         "x": "base64..."│  │                                  │
+    │  │       },                │  │                                  │
+    │  │     "ping_id": "abc123" │  │                                  │
+    │  │   }                     │  │                                  │
+    │  │ }                       │  │                                  │
+    │  └─────────────────────────┘  │                                  │
+    │──────────────────────────────▶│─────────────────────────────────▶│
+    │                               │                                  │
+    │                               │  6. Bob stores Alice's           │
+    │                               │     encryption public key        │
+    │                               │                                  │
+    │                               │◀─────────────────────────────────│
+    │  7. Receive Bob's key         │  Bob sends his KEY_EXCHANGE      │
+    │◀──────────────────────────────│                                  │
+    │                               │                                  │
+    │  Alice stores Bob's           │                                  │
+    │  encryption public key        │                                  │
+    │                               │                                  │
+
+
+  After Key Exchange, both parties have:
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                                                                 │
+  │  ALICE knows:                    BOB knows:                     │
+  │  ├─ Her private keys             ├─ His private keys            │
+  │  ├─ Her public keys              ├─ His public keys             │
+  │  └─ Bob's encryption pubkey      └─ Alice's encryption pubkey   │
+  │                                                                 │
+  └─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Message Encryption Flow
+
+### Step-by-Step Encryption
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    MESSAGE ENCRYPTION (Alice → Bob)                             │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │ STEP 1: ECDH Key Agreement (X25519)                                         │
+  │                                                                             │
+  │   Alice's Private Key          Bob's Public Key                             │
+  │   (X25519, 32 bytes)           (X25519, 32 bytes)                          │
+  │          │                            │                                     │
+  │          └────────────┬───────────────┘                                     │
+  │                       │                                                     │
+  │                       ▼                                                     │
+  │              ┌─────────────────┐                                            │
+  │              │  X25519 ECDH    │                                            │
+  │              │  Shared Secret  │                                            │
+  │              │  (32 bytes)     │                                            │
+  │              └────────┬────────┘                                            │
+  │                       │                                                     │
+  │   Note: Bob computes the SAME shared secret using:                          │
+  │         Bob's Private Key + Alice's Public Key                              │
+  │                                                                             │
+  └───────────────────────┼─────────────────────────────────────────────────────┘
+                          │
+                          ▼
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │ STEP 2: Key Derivation (HKDF-SHA256)                                        │
+  │                                                                             │
+  │   Shared Secret                                                             │
+  │   (32 bytes)                                                                │
+  │        │                                                                    │
+  │        ▼                                                                    │
+  │   ┌─────────────────────────────────────────┐                              │
+  │   │              HKDF-SHA256                │                              │
+  │   │                                         │                              │
+  │   │  info = "ping-nostr-chacha20poly1305-v1"│                              │
+  │   │  salt = (none)                          │                              │
+  │   │  length = 32 bytes                      │                              │
+  │   └────────────────┬────────────────────────┘                              │
+  │                    │                                                        │
+  │                    ▼                                                        │
+  │            ┌──────────────┐                                                 │
+  │            │ Derived Key  │                                                 │
+  │            │  (32 bytes)  │                                                 │
+  │            └──────┬───────┘                                                 │
+  │                   │                                                         │
+  └───────────────────┼─────────────────────────────────────────────────────────┘
+                      │
+                      ▼
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │ STEP 3: Message Padding                                                     │
+  │                                                                             │
+  │   Original Message                                                          │
+  │   ┌─────────────────────────────────┐                                      │
+  │   │ "Hello Bob!"                    │  (11 bytes)                          │
+  │   └─────────────────────────────────┘                                      │
+  │                    │                                                        │
+  │                    ▼                                                        │
+  │   ┌─────────────────────────────────────────────────────────────────┐      │
+  │   │ Padding to bucket size (256, 512, 1024, 2048, 4096, 8192)       │      │
+  │   │                                                                 │      │
+  │   │  [original message][0x00...padding...0x00]                      │      │
+  │   │  └──── 11 bytes ────┘└───── 245 bytes ─────┘                   │      │
+  │   │                                                                 │      │
+  │   │  Total: 256 bytes (smallest bucket that fits)                   │      │
+  │   └─────────────────────────────────────────────────────────────────┘      │
+  │                                                                             │
+  │   Purpose: Hides actual message length from observers                       │
+  │                                                                             │
+  └───────────────────────┼─────────────────────────────────────────────────────┘
+                          │
+                          ▼
+  ┌─────────────────────────────────────────────────────────────────────────────┐
+  │ STEP 4: Authenticated Encryption (ChaCha20-Poly1305)                        │
+  │                                                                             │
+  │   Derived Key         Random Nonce          Padded Message                  │
+  │   (32 bytes)          (12 bytes)            (256 bytes)                     │
+  │        │                   │                      │                         │
+  │        └───────────────────┼──────────────────────┘                         │
+  │                            │                                                │
+  │                            ▼                                                │
+  │                 ┌─────────────────────┐                                     │
+  │                 │  ChaCha20-Poly1305  │                                     │
+  │                 │  AEAD Encryption    │                                     │
+  │                 └──────────┬──────────┘                                     │
+  │                            │                                                │
+  │                            ▼                                                │
+  │   ┌─────────────────────────────────────────────────────────────────┐      │
+  │   │                     Ciphertext                                  │      │
+  │   │  ┌────────────┬───────────────────────────┬────────────────┐   │      │
+  │   │  │   Nonce    │     Encrypted Data        │   Auth Tag     │   │      │
+  │   │  │ (12 bytes) │      (256 bytes)          │  (16 bytes)    │   │      │
+  │   │  └────────────┴───────────────────────────┴────────────────┘   │      │
+  │   │                                                                 │      │
+  │   │  Total: 284 bytes                                               │      │
+  │   └─────────────────────────────────────────────────────────────────┘      │
+  │                                                                             │
+  │   Properties:                                                               │
+  │   • Confidentiality: Only key holder can decrypt                            │
+  │   • Integrity: Any tampering is detected via auth tag                       │
+  │   • Authenticity: Proves sender had the shared secret                       │
+  │                                                                             │
+  └─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Message Format (JSON)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         MESSAGE PAYLOAD STRUCTURE                               │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  Before Encryption (Plaintext JSON):
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ {                                                               │
+  │   "c": "Hello Bob!",           // Message content               │
+  │   "ts": 1706123456789,         // Timestamp (ms)                │
+  │   "u": "alice",                // Sender username               │
+  │   "id": "abc123def456..."      // Unique message ID (32 hex)    │
+  │ }                                                               │
+  └─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼ Encrypt
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ {                                                               │
+  │   "nonce": "base64_encoded_nonce",                              │
+  │   "ciphertext": "base64_encoded_encrypted_data"                 │
+  │ }                                                               │
+  └─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Nostr Event Structure
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         NOSTR EVENT (kind: 4242)                                │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  {
+    "id": "event_id_sha256_hash",        ◀── SHA256 of serialized event
+    
+    "pubkey": "alice_nostr_pubkey",      ◀── Alice's secp256k1 public key
+    
+    "created_at": 1706123456,            ◀── Unix timestamp
+    
+    "kind": 4242,                        ◀── Ping room message
+    
+    "tags": [
+      ["r", "fe08571d5b874dda..."],      ◀── Room tag (hashed room ID)
+      ["p", "bob_nostr_pubkey"]          ◀── Recipient's Nostr pubkey
+    ],
+    
+    "content": "{                        ◀── Encrypted payload
+      \"nonce\": \"base64...\",
+      \"ciphertext\": \"base64...\"
+    }",
+    
+    "sig": "schnorr_signature"           ◀── BIP-340 Schnorr signature
+  }
+
+
+  Event Kinds Used by Ping:
+  ┌────────┬─────────────────────┬────────────────────────────────────┐
+  │  Kind  │  Name               │  Purpose                           │
+  ├────────┼─────────────────────┼────────────────────────────────────┤
+  │  4242  │  PING_ROOM_MESSAGE  │  Encrypted room message            │
+  │  4243  │  PING_KEY_EXCHANGE  │  Share encryption public key       │
+  │  4244  │  PING_PRESENCE      │  Announce joining a room           │
+  │  4245  │  PING_LEAVE         │  Announce leaving a room           │
+  │  4246  │  PING_DM            │  Direct message (peer-to-peer)     │
+  └────────┴─────────────────────┴────────────────────────────────────┘
+```
+
+---
+
+## Complete Message Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    COMPLETE MESSAGE FLOW: Alice → Bob                           │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  ALICE                                                                BOB
+    │                                                                   │
+    │  1. User types: "Hello Bob!"                                      │
+    │  ════════════════════════════                                     │
+    │                                                                   │
+    │  2. Create message payload                                        │
+    │  ┌─────────────────────────┐                                      │
+    │  │ {                       │                                      │
+    │  │   "c": "Hello Bob!",    │                                      │
+    │  │   "ts": 1706123456789,  │                                      │
+    │  │   "u": "alice",         │                                      │
+    │  │   "id": "msg_abc123"    │                                      │
+    │  │ }                       │                                      │
+    │  └─────────────────────────┘                                      │
+    │                │                                                  │
+    │                ▼                                                  │
+    │  3. ECDH: Alice_priv × Bob_pub = shared_secret                    │
+    │                │                                                  │
+    │                ▼                                                  │
+    │  4. HKDF: shared_secret → derived_key                             │
+    │                │                                                  │
+    │                ▼                                                  │
+    │  5. Pad message to 256 bytes                                      │
+    │                │                                                  │
+    │                ▼                                                  │
+    │  6. ChaCha20-Poly1305 encrypt                                     │
+    │                │                                                  │
+    │                ▼                                                  │
+    │  7. Create Nostr event (kind: 4242)                               │
+    │  ┌─────────────────────────────────┐                              │
+    │  │ pubkey: alice_nostr_pk          │                              │
+    │  │ tags: [["r", room], ["p", bob]] │                              │
+    │  │ content: {nonce, ciphertext}    │                              │
+    │  └─────────────────────────────────┘                              │
+    │                │                                                  │
+    │                ▼                                                  │
+    │  8. Sign event with Alice's Nostr private key                     │
+    │     (BIP-340 Schnorr signature)                                   │
+    │                │                                                  │
+    │                ▼                                                  │
+    │  9. Publish to all connected relays                               │
+    │═══════════════════════════════════════════════════════════════════│
+    │                         NOSTR RELAYS                              │
+    │═══════════════════════════════════════════════════════════════════│
+    │                                                                   │
+    │                                    10. Relay broadcasts to        │
+    │                                        room subscribers           │
+    │                                                   │               │
+    │                                                   ▼               │
+    │                                    11. Bob receives event         │
+    │                                                   │               │
+    │                                                   ▼               │
+    │                                    12. Verify Schnorr signature   │
+    │                                        (proves from Alice)        │
+    │                                                   │               │
+    │                                                   ▼               │
+    │                                    13. Check ["p"] tag matches    │
+    │                                        Bob's pubkey               │
+    │                                                   │               │
+    │                                                   ▼               │
+    │                                    14. ECDH: Bob_priv × Alice_pub │
+    │                                        = shared_secret (same!)    │
+    │                                                   │               │
+    │                                                   ▼               │
+    │                                    15. HKDF → derived_key         │
+    │                                                   │               │
+    │                                                   ▼               │
+    │                                    16. ChaCha20-Poly1305 decrypt  │
+    │                                        + verify auth tag          │
+    │                                                   │               │
+    │                                                   ▼               │
+    │                                    17. Remove padding, parse JSON │
+    │                                                   │               │
+    │                                                   ▼               │
+    │                                    18. Display:                   │
+    │                                        "[12:34] alice: Hello Bob!"│
+    │                                                                   │
+```
+
+---
+
+## Privacy Envelope (Default Mode)
+
+In default mode, Ping adds an extra encryption layer:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         PRIVACY ENVELOPE STRUCTURE                              │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  Standard Message:
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  Nostr Event                                                    │
+  │  ├── pubkey: alice_master_key                                   │
+  │  ├── tags: [["r", real_room_tag], ["p", bob]]                   │
+  │  └── content: encrypted_message                                 │
+  └─────────────────────────────────────────────────────────────────┘
+  
+  ⚠️ Problem: Observers can see WHO is talking in WHICH room
+
+
+  Privacy Envelope (Default Mode):
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  Nostr Event                                                    │
+  │  ├── pubkey: ephemeral_key  ◀── Rotated frequently              │
+  │  ├── kind: 4  ◀── Generic DM (blends with traffic)              │
+  │  ├── tags: [["r", visible_tag], ["p", bob_master]]              │
+  │  └── content: {                                                 │
+  │        "protected": true,                                       │
+  │        "payload": encrypted_envelope  ◀── Double encrypted      │
+  │      }                                                          │
+  │                                                                 │
+  │  Inside encrypted_envelope:                                     │
+  │  ┌─────────────────────────────────────────────────────────┐   │
+  │  │ {                                                       │   │
+  │  │   "type": 1,  // MESSAGE                                │   │
+  │  │   "room": "real_room_tag",  ◀── Hidden from observers   │   │
+  │  │   "sender": "alice",                                    │   │
+  │  │   "timestamp": 1706123456789,                           │   │
+  │  │   "payload": { "c": "Hello!", "id": "..." }            │   │
+  │  │ }                                                       │   │
+  │  └─────────────────────────────────────────────────────────┘   │
+  └─────────────────────────────────────────────────────────────────┘
+
+  ✓ Observer sees: Random pubkey → Bob (looks like normal DM)
+  ✓ Observer cannot: Link messages to Alice or the room
+```
+
+---
+
+## Hardened Mode (Additional Protections)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         HARDENED MODE FEATURES                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  1. TIMING JITTER
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                                                                 │
+  │  Normal:    User types → Send immediately                       │
+  │  Hardened:  User types → Random delay (50-300ms) → Send         │
+  │                                                                 │
+  │  Purpose: Prevents timing correlation attacks                   │
+  │                                                                 │
+  └─────────────────────────────────────────────────────────────────┘
+
+  2. TIMESTAMP QUANTIZATION
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                                                                 │
+  │  Normal:    created_at = 1706123456 (exact second)              │
+  │  Hardened:  created_at = 1706123400 (rounded to 60s)            │
+  │                                                                 │
+  │  Purpose: Reduces timestamp precision for correlation           │
+  │                                                                 │
+  └─────────────────────────────────────────────────────────────────┘
+
+  3. DECOY TRAFFIC
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                                                                 │
+  │  Background task sends fake encrypted messages                  │
+  │  at random intervals (15-45 seconds)                            │
+  │                                                                 │
+  │  Decoy structure:                                               │
+  │  {                                                              │
+  │    "type": 255,  // DECOY                                       │
+  │    "padding": "random_data..."                                  │
+  │  }                                                              │
+  │                                                                 │
+  │  Recipients detect and silently discard decoys                  │
+  │                                                                 │
+  │  Purpose: Constant traffic makes real messages undetectable     │
+  │                                                                 │
+  └─────────────────────────────────────────────────────────────────┘
+
+  4. ROOM TAG OBFUSCATION (Future)
+  ┌─────────────────────────────────────────────────────────────────┐
+  │                                                                 │
+  │  Subscribe to multiple decoy room tags                          │
+  │  Real room tag hidden among fake subscriptions                  │
+  │                                                                 │
+  │  Purpose: Hides which room user is actually in                  │
+  │                                                                 │
+  └─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Security Properties
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         SECURITY GUARANTEES                                     │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  ✓ CONFIDENTIALITY
+    │
+    ├── Messages encrypted with ChaCha20-Poly1305
+    ├── Only sender and recipient can decrypt
+    ├── Relays see only ciphertext
+    └── Even Nostr relay operators cannot read messages
+
+  ✓ INTEGRITY
+    │
+    ├── Poly1305 MAC detects any tampering
+    ├── Modified ciphertext fails authentication
+    └── Cannot flip bits or modify encrypted content
+
+  ✓ AUTHENTICITY
+    │
+    ├── Nostr events signed with Schnorr signatures
+    ├── Verifiable that event came from claimed pubkey
+    └── Cannot forge messages from another user
+
+  ✓ FORWARD SECRECY (Partial)
+    │
+    ├── Ephemeral mode: New keys each session
+    ├── Compromising current keys doesn't reveal past messages
+    └── (Full PFS would require key ratcheting - future work)
+
+  ✓ METADATA PROTECTION (Default Mode)
+    │
+    ├── Ephemeral Nostr pubkeys (rotated)
+    ├── Real room tag encrypted in envelope
+    ├── Message type hidden from observers
+    └── Sender identity protected
+
+  ✓ TRAFFIC ANALYSIS RESISTANCE (Hardened Mode)
+    │
+    ├── Timing jitter prevents correlation
+    ├── Decoy traffic masks real messages
+    ├── Constant message size (padding)
+    └── Quantized timestamps
+
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         THREAT MODEL                                            │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  PROTECTED AGAINST:
+  ├── Passive eavesdroppers (ISP, network observers)
+  ├── Malicious relay operators
+  ├── Other users trying to read your messages
+  ├── Message tampering or forgery
+  └── Basic traffic analysis (with hardened mode)
+
+  NOT PROTECTED AGAINST:
+  ├── Compromised endpoint (malware on your device)
+  ├── Rubber hose cryptanalysis (physical coercion)
+  ├── Quantum computers (future threat to ECDH)
+  ├── Global passive adversary with full traffic view
+  └── Bugs in implementation (audit in progress)
+```
+
+---
+
+## Summary
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              ALGORITHM SUMMARY                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+  ┌─────────────────┬──────────────────────────────────────────────────────────┐
+  │  Component      │  Algorithm / Standard                                    │
+  ├─────────────────┼──────────────────────────────────────────────────────────┤
+  │  Key Agreement  │  X25519 (Curve25519 ECDH)                                │
+  │  Key Derivation │  HKDF-SHA256                                             │
+  │  Encryption     │  ChaCha20-Poly1305 (AEAD)                                │
+  │  Nostr Signing  │  BIP-340 Schnorr (secp256k1)                             │
+  │  Hashing        │  SHA-256                                                 │
+  │  Encoding       │  Base64, JSON, Hex                                       │
+  │  Transport      │  WebSocket (WSS/TLS)                                     │
+  │  Protocol       │  Nostr (NIP-01)                                          │
+  └─────────────────┴──────────────────────────────────────────────────────────┘
+
+  Data Flow:
+  
+  Plaintext → Pad → ChaCha20-Poly1305 → Base64 → JSON → Nostr Event → Sign → Relay
+                          ▲
+                          │
+              HKDF(X25519(my_priv, their_pub))
+```
+
+---
+
+*Document version: 1.0*
+*Last updated: January 2026*
