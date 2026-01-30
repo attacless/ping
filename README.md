@@ -24,6 +24,7 @@
 - [📦 Installation](#-installation)
 - [🚀 Usage](#-usage)
 - [🎨 Themes](#-themes)
+- [🎮 Fun Features](#-fun-features)
 - [💾 Session Management](#-session-management)
 - [🔄 Updates](#-updates)
 - [📱 Ping on Mobile](#-ping-on-mobile)
@@ -56,12 +57,24 @@
 - **Invite codes** with QR generation
 - **Sound notifications** with mention detection
 - **Exportable sessions** - sessions can be saved/loaded from local storage
+- **@mentions** with tab completion and disambiguation
+- **Unicode/emoji support** - paste emojis directly
 
-### 🎨 Customizable
+### 🎨 Modern Terminal UI
+- **Curses-based interface** with split panes
+- **Right panel** showing connection info and peer list
+- **Status bar** with room info and shortcuts
+- **Mouse text selection** for copy/paste
+- **Scrollable chat history** with Page Up/Down
+- **Tab completion** for commands, usernames, and @mentions
+- **Command history** with Up/Down arrows
 - **20+ color themes** (matrix, tron, amber, etc.)
-- **Custom colors** - set any bg/fg combination
-- **Portable** - single Python file, no install needed
-- **Cross-platform** - Linux, macOS, Windows, mobile
+
+### 🎮 Fun Features
+- **Dice rolling** with ASCII art
+- **Dice duels** - challenge peers to dice battles
+- **ASCII stickers** - customizable sticker packs
+- **Name changes** broadcast to room in real-time
 
 ---
 
@@ -124,13 +137,13 @@ curl -O https://raw.githubusercontent.com/attacless/ping/main/ping.py && pip ins
 git clone https://github.com/attacless/ping.git
 cd ping
 
-#Install pip
+# Install pip
 sudo apt install python3-pip
 
-#Install dependecies
+# Install dependencies
 sudo apt install python3-cryptography python3-websockets python3-certifi
 
-#Install optional dependencies
+# Install optional dependencies
 sudo apt install python3-coincurve python3-secp256k1
 
 # Optional: QR code generation
@@ -139,49 +152,49 @@ sudo apt install qrcode
 
 ### CentOS/Fedora/RHEL
 ```bash
-#Install pip
+# Install pip
 sudo yum install python-pip
 
-#Install required packages
+# Install required packages
 pip install cryptography websockets certifi
 
-#Install optional packages
+# Install optional packages
 pip install coincurve secp256k1
 
-#Install optional QR code library
+# Install optional QR code library
 pip install qrcode
 ```
 
 ### Android (Termux)
 ```bash
-#Install python
+# Install python
 pkg install python
 
-#Download
+# Download
 curl -O https://raw.githubusercontent.com/attacless/ping/main/ping.py
 
-#Make file executable
+# Make file executable
 chmod +x ping.py
 
-#Export ANDROID_API_LEVEL
+# Export ANDROID_API_LEVEL
 export ANDROID_API_LEVEL=$(getprop ro.build.version.sdk)
 
-#Install rust
+# Install rust
 pkg install rust
 
-#Install cryptography
+# Install cryptography
 pip install cryptography websockets certifi
 ```
 
-# iPhone (a-Shell mini)
+### iPhone (a-Shell mini)
 ```bash
-#Install dependencies
+# Install dependencies
 pip3 install cryptography websockets certifi
 
-#Download
+# Download
 curl -O https://raw.githubusercontent.com/attacless/ping/main/ping.py
 
-#Make file executable
+# Make file executable
 chmod +x ping.py
 ```
 
@@ -206,8 +219,11 @@ chmod +x ping.py
 ### Basic Usage
 
 ```bash
-# Start Ping (interactive mode)
+# Start Ping (interactive mode with curses UI)
 python ping.py
+
+# Start in classic terminal mode (no curses)
+python ping.py --classic
 
 # Join a room directly
 python ping.py -r myroom
@@ -221,8 +237,6 @@ python ping.py -i ping1eyJyIjoibXlyb29tIn0
 
 ### Command Line Options
 
-![Command line options](docs/images/98ac9ad6d35e.png)
-
 ```
 python ping.py [OPTIONS]
 
@@ -233,9 +247,10 @@ Options:
   -u, --username NAME   Set your display name
   -c, --color THEME     Set color theme (e.g., matrix, tron)
   -l, --load            Load session from pingconfig.json
-  --persist             Persistent mode (save to ~/.ping-data)
+  --persist             Persistent mode (save to ~/.ping)
   --legacy              Legacy mode (compatible with old clients)
   --hardened            Hardened privacy mode
+  --classic             Classic terminal mode (no curses UI)
   --no-sound            Disable sound notifications
   --update              Check for and install updates
   -d, --debug           Show debug output
@@ -249,21 +264,51 @@ Options:
 | **Room** | `/join <room> [pass]` | Join a room (with optional password) |
 | | `/leave` | Leave current room |
 | | `/invite` | Generate invite code + QR |
-| | `/peers` | Show connected peers |
+| | `/peers` | Show connected peers with fingerprints |
 | | `/reconnect` | Reconnect to relays |
 | **Chat** | `/dm <user> <msg>` | Send direct message |
-| | `/name <username>` | Change display name |
+| | `/name <username>` | Change display name (broadcasts to room) |
+| | `/roll` | Roll two dice with ASCII art 🎲 |
+| | `/challenge <user>` | Challenge peer to dice duel ⚔️ |
+| | `/accept` | Accept a dice challenge |
+| | `/decline` | Decline a dice challenge |
+| | `/sticker` | Show available ASCII stickers |
+| | `/sticker <num\|name>` | Send a sticker 🎨 |
 | **View** | `/info` | Show session info |
 | | `/relays` | Show relay status |
-| | `/printsession` | Show encryption keys |
 | | `/clear` | Clear screen |
 | **Config** | `/color [theme]` | Set colors (`/color themes` for list) |
-| | `/sound [on\|off]` | Toggle sound notifications |
-| **Data** | `/save` | Export user session to pingconfig.json |
-| | `/load` | Import user session from pingconfig.json |
-| | `/update` | Check for updates |
+| | `/color <bg> <fg>` | Set custom background/foreground |
+| | `/sound [on\|off\|test]` | Toggle sound notifications |
+| **Session** | `/printsession` | Show encryption keys |
+| | `/save` | Export session to pingconfig.json |
+| | `/save withhistory` | Export session + chat history |
+| | `/load` | Import session from pingconfig.json |
+| **Misc** | `/update [apply]` | Check for updates |
 | | `/wipe` | Delete all local data |
-| **Exit** | `/quit` | Exit Ping |
+| | `/quit` | Exit Ping |
+| | `/help` | Show command help |
+
+### Keyboard Shortcuts (Curses Mode)
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+F` | Toggle side panel |
+| `Ctrl+T` | Cycle through themes |
+| `Page Up/Down` | Scroll chat history |
+| `↑/↓` | Command history |
+| `Tab` | Auto-complete commands/usernames |
+| `Ctrl+U` | Clear input line |
+| `Ctrl+W` | Delete word |
+| `Ctrl+A` | Beginning of line |
+| `Ctrl+E` | End of line |
+
+### @Mentions
+
+Mention peers in messages with `@username`:
+- Tab completion for usernames
+- Sound notification when mentioned
+- Fingerprint disambiguation for duplicate names: `@alice[abc12345]`
 
 ---
 
@@ -282,7 +327,7 @@ Ping includes 20+ built-in color themes:
 /color blue white  # Blue background, white text
 /color - lgreen    # Keep background, light green text
 
-# Show themes
+# Show all themes
 /color themes
 
 # Reset to default
@@ -291,7 +336,76 @@ Ping includes 20+ built-in color themes:
 
 ![Themes](docs/images/96f8617f2979.png)
 
-**Available themes:** `matrix`, `tron`, `classic`, `amber`, `light`, `ocean`, `sunset`, `grape`, `snow`, `midnight`, `coffee`, and more.
+**Available themes:** `default`, `matrix`, `tron`, `classic`, `amber`, `light`, `dark`, `ocean`, `sunset`, `grape`, `snow`, `midnight`, `coffee`, `forest`, `rose`, `slate`, `mono`, `neon`, `retro`, `vapor`, `nord`
+
+---
+
+## 🎮 Fun Features
+
+### Dice Rolling 🎲
+
+Roll dice with ASCII art that's broadcast to the room:
+
+```
+/roll
+```
+
+Output:
+```
+🎲 rolled:
+┌───────┐  ┌───────┐
+│ ●   ● │  │ ●     │
+│   ●   │  │   ●   │
+│ ●   ● │  │     ● │
+└───────┘  └───────┘
+Total: [5] + [3] = 8
+```
+
+### Dice Duels ⚔️
+
+Challenge other peers to dice battles:
+
+```
+/challenge alice        # Challenge alice to a duel
+/accept                 # Accept a challenge
+/decline                # Decline a challenge
+```
+
+The winner is announced to the entire room!
+
+### ASCII Stickers 🎨
+
+Send customizable ASCII art stickers:
+
+```
+/sticker               # Show all available stickers
+/sticker 1             # Send sticker #1
+/sticker smile         # Send sticker by name
+```
+
+Stickers are loaded from `pingstickers.json`. Place this file in:
+- Current directory (`./pingstickers.json`)
+- Home config (`~/.ping/pingstickers.json`)
+- Home directory (`~/pingstickers.json`)
+
+**Sample sticker format:**
+```json
+{
+  "version": 1,
+  "stickers": [
+    {
+      "name": "smile",
+      "art": [
+        "  ╔══════════╗  ",
+        "  ║  ●    ●  ║  ",
+        "  ║    __    ║  ",
+        "  ║   \\__/   ║  ",
+        "  ╚══════════╝  "
+      ]
+    }
+  ]
+}
+```
 
 ---
 
@@ -305,6 +419,9 @@ By default, Ping runs in **ephemeral mode** - a new keyset is generated each ses
 # Save current user session to pingconfig.json
 /save
 
+# Save with chat history
+/save withhistory
+
 # Load user on next run
 python ping.py --load
 ```
@@ -312,7 +429,7 @@ python ping.py --load
 ### Persistent Mode
 
 ```bash
-# Always use the same user session (stored in ~/.ping-data)
+# Always use the same user session (stored in ~/.ping)
 python ping.py --persist
 ```
 
@@ -322,7 +439,7 @@ The `pingconfig.json` file contains your user session keys:
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "identity": {
     "nostr_private_key": "base64...",
     "nostr_public_key": "hex...",
@@ -333,6 +450,14 @@ The `pingconfig.json` file contains your user session keys:
     "created_at": 1234567890
   },
   "username": "cosmic-wolf-123",
+  "settings": {
+    "sound_enabled": true,
+    "theme": "matrix"
+  },
+  "room": {
+    "name": "myroom",
+    "password": null
+  },
   "exported_at": 1234567890
 }
 ```
@@ -369,7 +494,7 @@ curl -O https://raw.githubusercontent.com/attacless/ping/main/ping.py
 python ping.py
 ```
 
-> **Tip:** Use `--no-sound` if terminal bells are annoying on mobile.
+> **Tip:** Use `--no-sound` if terminal bells are annoying on mobile. Use `--classic` if the curses UI doesn't work well on your terminal.
 
 ---
 
@@ -389,7 +514,7 @@ Ping uses the Nostr protocol for decentralized message relay, with end-to-end en
        │◀─────────────────────────────────────▶│
        │                                       │
        │   2. Encrypted Messages (E2E)         │
-       │◀══════════════════════════════════════▶│
+       │◀═════════════════════════════════════▶│
        │   (Only Alice & Bob can decrypt)      │
 ```
 
