@@ -118,6 +118,74 @@ pip install qrcode
 curl -O https://raw.githubusercontent.com/attacless/ping/main/ping.py && pip install cryptography websockets certifi && python ping.py
 ```
 
+### Debian/Ubuntu/Tails/Mint
+```bash
+# Clone the repository
+git clone https://github.com/attacless/ping.git
+cd ping
+
+#Install pip
+sudo apt install python3-pip
+
+#Install dependecies
+sudo apt install python3-cryptography python3-websockets python3-certifi
+
+#Install optional dependencies
+sudo apt install python3-coincurve python3-secp256k1
+
+# Optional: QR code generation
+sudo apt install qrcode
+```
+
+### CentOS/Fedora/RHEL
+```bash
+#Install pip
+sudo yum install python-pip
+
+#Install required packages
+pip install cryptography websockets certifi
+
+#Install optional packages
+pip install coincurve secp256k1
+
+#Install optional QR code library
+pip install qrcode
+```
+
+### Android (Termux)
+```bash
+#Install python
+pkg install python
+
+#Download
+curl -O https://raw.githubusercontent.com/attacless/ping/main/ping.py
+
+#Make file executable
+chmod +x ping.py
+
+#Export ANDROID_API_LEVEL
+export ANDROID_API_LEVEL=$(getprop ro.build.version.sdk)
+
+#Install rust
+pkg install rust
+
+#Install cryptography
+pip install cryptography websockets certifi
+```
+
+# iPhone (a-Shell mini)
+```bash
+#Install dependencies
+pip3 install cryptography websockets certifi
+
+#Download
+curl -O https://raw.githubusercontent.com/attacless/ping/main/ping.py
+
+#Make file executable
+chmod +x ping.py
+```
+
+
 ### Dependencies
 
 | Package | Required | Purpose |
