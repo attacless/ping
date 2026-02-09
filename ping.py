@@ -251,6 +251,14 @@ CURRENT_FG = None  # Current foreground color
 UPDATE_URL = "https://raw.githubusercontent.com/attacless/ping/main/ping.py"
 UPDATE_CHECK_URL = UPDATE_URL  # Same URL, we'll check version from content
 
+# Official addons to download during updates
+# Format: (filename, raw_github_url)
+OFFICIAL_ADDONS = [
+    ("charts.py", "https://raw.githubusercontent.com/attacless/ping/main/addons/charts.py"),
+    ("weather.py", "https://raw.githubusercontent.com/attacless/ping/main/addons/weather.py"),
+    ("pong.py", "https://raw.githubusercontent.com/attacless/ping/main/addons/pong.py"),
+]
+
 # Public Nostr relays (decentralized!) - free, no signup required
 # NOSTR_RELAYS = [
 #     "wss://relay.damus.io",
@@ -413,6 +421,233 @@ def get_data_dir() -> Path:
         return primary
 
 DATA_DIR = get_data_dir()
+ADDONS_DIR = DATA_DIR / "addons"
+
+# =============================================================================
+# Addon System
+# =============================================================================
+
+class PingAddon:
+    """Base class for Ping addons.
+    
+    Addons should subclass this and implement the required methods.
+    Place addon files in ~/.ping/addons/
+    
+    Required attributes:
+        name: str - Display name of the addon
+        version: str - Version string
+        commands: dict - Map of command names to (handler, help_text)
+    
+    Optional methods:
+        on_load(cli) - Called when addon is loaded
+        on_unload() - Called when addon is unloaded
+        on_message(sender, text) - Called for each message received
+    """
+    name: str = "Unnamed Addon"
+    version: str = "1.0.0"
+    description: str = ""
+    commands: dict = {}  # {"command_name": (async_handler, "help text")}
+    
+    def __init__(self):
+        self.cli = None  # Will be set by loader
+    
+    def on_load(self, cli) -> None:
+        """Called when the addon is loaded. cli is the PingNostrCLI instance."""
+        self.cli = cli
+    
+    def on_unload(self) -> None:
+        """Called when the addon is unloaded."""
+        pass
+    
+    def on_message(self, sender: str, text: str) -> None:
+        """Called for each message received (optional hook)."""
+        pass
+
+
+class AddonManager:
+    """Manages loading and running Ping addons."""
+    
+    def __init__(self):
+        self.addons: Dict[str, PingAddon] = {}
+        self.commands: Dict[str, tuple] = {}  # command -> (addon, handler, help)
+        self.cli = None
+    
+    def set_cli(self, cli) -> None:
+        """Set the CLI instance for addons to use."""
+        self.cli = cli
+        # Update existing addons
+        for addon in self.addons.values():
+            addon.cli = cli
+    
+    def load_addons(self) -> list[str]:
+        """Load all addons from multiple addon directories.
+        
+        Search order:
+        1. ~/.ping/addons/ (user addons)
+        2. ./addons/ (current working directory)
+        3. <script_dir>/addons/ (next to ping.py)
+        
+        Returns list of loaded addon names.
+        """
+        import importlib.util
+        import os
+        
+        loaded = []
+        seen_files = set()  # Avoid loading same addon twice
+        
+        # Build list of addon directories to search
+        addon_dirs = []
+        
+        # 1. User data directory (~/.ping/addons/)
+        if ADDONS_DIR.exists():
+            addon_dirs.append(ADDONS_DIR)
+        
+        # 2. Current working directory (./addons/)
+        cwd_addons = Path.cwd() / "addons"
+        if cwd_addons.exists() and cwd_addons not in addon_dirs:
+            addon_dirs.append(cwd_addons)
+        
+        # 3. Script directory (<script_dir>/addons/)
+        try:
+            script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+            script_addons = script_dir / "addons"
+            if script_addons.exists() and script_addons not in addon_dirs:
+                addon_dirs.append(script_addons)
+        except:
+            pass
+        
+        # 4. Also try sys.argv[0] directory
+        try:
+            argv_dir = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
+            argv_addons = argv_dir / "addons"
+            if argv_addons.exists() and argv_addons not in addon_dirs:
+                addon_dirs.append(argv_addons)
+        except:
+            pass
+        
+        # Load addons from all directories
+        for addon_dir in addon_dirs:
+            for file_path in addon_dir.glob("*.py"):
+                if file_path.name.startswith("_"):
+                    continue
+                
+                # Skip if we've already loaded an addon with this name
+                if file_path.name in seen_files:
+                    continue
+                seen_files.add(file_path.name)
+                
+                try:
+                    # Load the module
+                    module_name = f"ping_addon_{file_path.stem}"
+                    spec = importlib.util.spec_from_file_location(
+                        module_name, 
+                        file_path
+                    )
+                    if spec is None or spec.loader is None:
+                        continue
+                    
+                    module = importlib.util.module_from_spec(spec)
+                    
+                    # Register module in sys.modules BEFORE execution
+                    # This is required for @dataclass and other decorators to work
+                    sys.modules[module_name] = module
+                    
+                    # Inject PingAddon into the module's namespace before execution
+                    module.PingAddon = PingAddon
+                    
+                    # Also inject common ping globals that addons might need
+                    module.DEBUG = DEBUG
+                    
+                    try:
+                        spec.loader.exec_module(module)
+                    except Exception as e:
+                        # Clean up on failure
+                        sys.modules.pop(module_name, None)
+                        raise
+                    
+                    # First check for setup() function (preferred method)
+                    if hasattr(module, 'setup'):
+                        try:
+                            addon = module.setup()
+                            if addon and hasattr(addon, 'commands'):
+                                self._register_addon(file_path.stem, addon)
+                                loaded.append(addon.name)
+                                if DEBUG:
+                                    print(f"    [debug] Loaded addon {addon.name} from {file_path}")
+                                continue
+                        except Exception as e:
+                            if DEBUG:
+                                print(f"    [debug] setup() failed for {file_path.name}: {e}")
+                    
+                    # Fall back to finding PingAddon subclass
+                    addon_class = None
+                    for attr_name in dir(module):
+                        attr = getattr(module, attr_name)
+                        if (isinstance(attr, type) and 
+                            issubclass(attr, PingAddon) and 
+                            attr is not PingAddon):
+                            addon_class = attr
+                            break
+                    
+                    if addon_class:
+                        addon = addon_class()
+                        self._register_addon(file_path.stem, addon)
+                        loaded.append(addon.name)
+                        if DEBUG:
+                            print(f"    [debug] Loaded addon {addon.name} from {file_path}")
+                    
+                except Exception as e:
+                    if DEBUG:
+                        print(f"    [debug] Failed to load addon {file_path.name}: {e}")
+                        import traceback
+                        traceback.print_exc()
+        
+        return loaded
+    
+    def _register_addon(self, module_name: str, addon: PingAddon) -> None:
+        """Register an addon and its commands."""
+        self.addons[module_name] = addon
+        
+        if self.cli:
+            addon.on_load(self.cli)
+        
+        # Register commands
+        for cmd_name, (handler, help_text) in addon.commands.items():
+            cmd_lower = cmd_name.lower().lstrip('/')
+            self.commands[cmd_lower] = (addon, handler, help_text)
+    
+    def get_command(self, cmd: str) -> Optional[tuple]:
+        """Get addon command handler if it exists.
+        
+        Returns (addon, handler, help_text) or None.
+        """
+        return self.commands.get(cmd.lower())
+    
+    def get_all_commands(self) -> Dict[str, str]:
+        """Get all addon commands and their help text."""
+        return {cmd: help_text for cmd, (_, _, help_text) in self.commands.items()}
+    
+    def on_message(self, sender: str, text: str) -> None:
+        """Dispatch message to all addons."""
+        for addon in self.addons.values():
+            try:
+                addon.on_message(sender, text)
+            except Exception:
+                pass
+    
+    def unload_all(self) -> None:
+        """Unload all addons."""
+        for addon in self.addons.values():
+            try:
+                addon.on_unload()
+            except Exception:
+                pass
+        self.addons.clear()
+        self.commands.clear()
+
+
+# Global addon manager
+ADDON_MANAGER = AddonManager()
 
 # Usernames
 ADJECTIVES = ["cosmic", "quantum", "stellar", "cyber", "neon", "shadow", "phantom", "mystic",
@@ -575,6 +810,8 @@ class CursesUI:
         self.cursor_pos = 0
         self.prompt = "> "
         self.running = False
+        self.paused = False  # When True, UI doesn't process input or redraw (for addons)
+        self.addon_mode = False  # When True, completely hands over control to addon
         self.input_queue = None  # asyncio queue for input
         self.message_queue = None  # asyncio queue for messages to display
         self.scroll_offset = 0  # 0 = at bottom (latest), >0 = scrolled up
@@ -1294,16 +1531,31 @@ class CursesUI:
         Returns either:
         - int: for special keys (arrows, function keys, etc.)
         - str: for regular characters including Unicode/emoji
-        - -1: on error
+        - -1: on error or timeout or paused/addon_mode
         """
         import curses
+        import time
+        
+        # If in addon mode or paused, return immediately
+        if self.addon_mode or self.paused:
+            time.sleep(0.01)  # Very short sleep
+            return -1
+        
         if not self.input_win:
             return -1
+        
         try:
-            self.input_win.nodelay(False)  # Blocking read
-            # Use get_wch() for Unicode support - returns int for special keys, str for chars
-            return self.input_win.get_wch()
+            # Use a short timeout so we can check state frequently
+            self.input_win.timeout(50)  # 50ms timeout
+            result = self.input_win.get_wch()
+            self.input_win.timeout(-1)
+            return result
         except curses.error:
+            # Timeout or error
+            try:
+                self.input_win.timeout(-1)
+            except:
+                pass
             return -1
         except:
             return -1
@@ -1925,9 +2177,93 @@ def get_script_path() -> Path:
     """Get the path to the current script"""
     return Path(__file__).resolve()
 
-def perform_update(new_content: str) -> tuple[bool, str]:
+def fetch_addon(url: str) -> tuple[Optional[str], Optional[str]]:
+    """Fetch addon content from URL. Returns (content, error)."""
+    import urllib.request
+    import ssl
+    
+    try:
+        ctx = ssl.create_default_context()
+        req = urllib.request.Request(
+            url,
+            headers={'User-Agent': f'PingNostr/{APP_VERSION}'}
+        )
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
+            return response.read().decode('utf-8'), None
+    except Exception as e:
+        return None, str(e)
+
+def get_addons_dir() -> Path:
+    """Get the addons directory (next to script, or in data dir)."""
+    import os
+    
+    # Prefer directory next to the script
+    try:
+        script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+        addons_dir = script_dir / "addons"
+        # Check if we can write there
+        addons_dir.mkdir(parents=True, exist_ok=True)
+        test_file = addons_dir / ".write_test"
+        try:
+            test_file.touch()
+            test_file.unlink()
+            return addons_dir
+        except:
+            pass
+    except:
+        pass
+    
+    # Fall back to data directory
+    return ADDONS_DIR
+
+def download_official_addons(verbose: bool = True) -> tuple[int, int, list[str]]:
+    """
+    Download official addons from the repository.
+    
+    Returns (downloaded_count, failed_count, error_messages)
+    """
+    addons_dir = get_addons_dir()
+    
+    try:
+        addons_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        return 0, len(OFFICIAL_ADDONS), [f"Cannot create addons directory: {e}"]
+    
+    downloaded = 0
+    failed = 0
+    errors = []
+    
+    for filename, url in OFFICIAL_ADDONS:
+        if verbose:
+            print(f"    Downloading {filename}...")
+        
+        content, error = fetch_addon(url)
+        
+        if error:
+            failed += 1
+            errors.append(f"{filename}: {error}")
+            if verbose:
+                print(f"    ✗ Failed: {error}")
+            continue
+        
+        try:
+            addon_path = addons_dir / filename
+            addon_path.write_text(content, encoding='utf-8')
+            downloaded += 1
+            if verbose:
+                print(f"    ✓ {filename}")
+        except Exception as e:
+            failed += 1
+            errors.append(f"{filename}: {e}")
+            if verbose:
+                print(f"    ✗ Write failed: {e}")
+    
+    return downloaded, failed, errors
+
+def perform_update(new_content: str, include_addons: bool = True) -> tuple[bool, str]:
     """
     Update the script file with new content.
+    Optionally also downloads official addons.
     Returns (success, message)
     """
     script_path = get_script_path()
@@ -1948,7 +2284,18 @@ def perform_update(new_content: str) -> tuple[bool, str]:
         # Write new content
         script_path.write_text(new_content, encoding='utf-8')
         
-        return True, f"Updated successfully! Backup saved to {backup_path.name}"
+        messages = [f"Updated successfully! Backup saved to {backup_path.name}"]
+        
+        # Download addons
+        if include_addons and OFFICIAL_ADDONS:
+            print(f"  Downloading official addons...")
+            downloaded, failed, errors = download_official_addons(verbose=True)
+            if downloaded > 0:
+                messages.append(f"Downloaded {downloaded} addon(s)")
+            if failed > 0:
+                messages.append(f"Failed to download {failed} addon(s)")
+        
+        return True, " | ".join(messages)
     
     except PermissionError:
         return False, "Permission denied. Try running with appropriate permissions."
@@ -4266,6 +4613,10 @@ class PingNostrCLI:
             if line.startswith('/dm ') or line.startswith('/d '):
                 return self._complete_dm_curses(line, state)
             
+            # Check if we're completing a /challenge command
+            if line.startswith('/challenge '):
+                return self._complete_challenge_curses(line, state)
+            
             # Check if we're completing a /color command
             if line.startswith('/color '):
                 return self._complete_color_curses(line, state)
@@ -4414,6 +4765,51 @@ class PingNostrCLI:
         if state < len(matches):
             # Return full line with completed target
             return f"{parts[0]} {matches[state]} "
+        return None
+    
+    def _complete_challenge_curses(self, line: str, state: int) -> Optional[str]:
+        """Complete peer usernames/fingerprints for /challenge command in curses mode"""
+        if not self.client or not self.client.peers:
+            return None
+        
+        # Build list of completion targets: username and username[fingerprint]
+        targets = []
+        seen_usernames = {}
+        
+        for pk, peer in self.client.peers.items():
+            if not peer.encryption_pubkey:
+                continue
+            username = peer.username or "unknown"
+            fp = peer.identity[:8] if peer.identity else pk[:8]
+            
+            # Track duplicate usernames
+            if username.lower() in seen_usernames:
+                seen_usernames[username.lower()].append(fp)
+            else:
+                seen_usernames[username.lower()] = [fp]
+            
+            targets.append((username, fp))
+        
+        # Build completion list
+        completions = []
+        for username, fp in targets:
+            # If username is unique, add just the username
+            if len(seen_usernames.get(username.lower(), [])) == 1:
+                completions.append(username)
+            # Always add username[fingerprint] format
+            completions.append(f"{username}[{fp}]")
+        
+        # Get current input after /challenge
+        parts = line.split(maxsplit=1)
+        prefix = parts[1].lower() if len(parts) > 1 else ""
+        
+        # Filter matches
+        matches = [c for c in completions if c.lower().startswith(prefix)]
+        matches = list(set(matches))  # Remove duplicates
+        matches.sort()
+        
+        if state < len(matches):
+            return f"/challenge {matches[state]}"
         return None
     
     def _complete_color_curses(self, line: str, state: int) -> Optional[str]:
@@ -4708,7 +5104,8 @@ class PingNostrCLI:
     ↑/↓        Command history
 
   MISC
-    /update [apply]       Check/install updates
+    /update [addons]      Check/install updates (or just addons)
+    /addons               List loaded addons
     /wipe                 Reset all data
     /quit                 Exit Ping
 
@@ -4716,10 +5113,62 @@ class PingNostrCLI:
   Type any text to send encrypted message to room.
   ════════════════════════════════════════════════════
 """)
+        # Show addon commands if any
+        addon_cmds = ADDON_MANAGER.get_all_commands()
+        if addon_cmds:
+            self._print("\n  ADDON COMMANDS")
+            for cmd, help_text in sorted(addon_cmds.items()):
+                self._print(f"    /{cmd:18} {help_text}")
+            self._print("")
+    
+    def _list_addons(self):
+        """List loaded addons and their commands"""
+        import os
+        
+        if not ADDON_MANAGER.addons:
+            self._print("  No addons loaded.")
+            self._print("\n  Place addon .py files in any of these directories:")
+            self._print(f"    • {ADDONS_DIR}")
+            self._print(f"    • {Path.cwd() / 'addons'}")
+            try:
+                script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+                self._print(f"    • {script_dir / 'addons'}")
+            except:
+                pass
+            return
+        
+        self._print("\n  ╔═══════════════════════════════════════════╗")
+        self._print("  ║            LOADED ADDONS                   ║")
+        self._print("  ╠═══════════════════════════════════════════╣")
+        
+        for module_name, addon in ADDON_MANAGER.addons.items():
+            self._print(f"  ║  {addon.name:20} v{addon.version:10}   ║")
+            if addon.description:
+                self._print(f"  ║    {addon.description[:38]:38} ║")
+            for cmd in addon.commands:
+                self._print(f"  ║    /{cmd:36} ║")
+        
+        self._print("  ╚═══════════════════════════════════════════╝")
+        self._print("\n  Addon search paths:")
+        self._print(f"    • {ADDONS_DIR}")
+        self._print(f"    • {Path.cwd() / 'addons'}")
+        try:
+            import os
+            script_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+            self._print(f"    • {script_dir / 'addons'}")
+        except:
+            pass
+        self._print("")
     
     async def run(self):
         """Main run loop with curses UI"""
         global CURSES_UI, CURSES_MODE
+        
+        # Load addons
+        ADDON_MANAGER.set_cli(self)
+        loaded_addons = ADDON_MANAGER.load_addons()
+        if loaded_addons and DEBUG:
+            print(f"  Loaded addons: {', '.join(loaded_addons)}")
         
         # Try to use curses
         use_curses = CURSES_MODE
@@ -4830,6 +5279,16 @@ class PingNostrCLI:
         
         while self.running and ui.running:
             try:
+                # Check if addon has taken over completely
+                if ui.addon_mode:
+                    await asyncio.sleep(0.01)  # Yield to event loop frequently
+                    continue
+                
+                # Check if UI is paused (addon has taken over)
+                if ui.paused:
+                    await asyncio.sleep(0.05)
+                    continue
+                
                 # Update prompt
                 self._update_prompt()
                 
@@ -4837,6 +5296,10 @@ class PingNostrCLI:
                 ch = await loop.run_in_executor(None, ui.get_input_char)
                 
                 if ch == -1:
+                    continue
+                
+                # Double-check pause state (might have changed while waiting)
+                if ui.paused or ui.addon_mode:
                     continue
                     
                 # Handle the key
@@ -5047,10 +5510,22 @@ class PingNostrCLI:
                 await self._decline()
             elif cmd in ('sticker', 'stickers', 's'):
                 await self._sticker(args)
+            elif cmd == 'addons':
+                self._list_addons()
             elif cmd == 'help':
                 self._help()
             else:
-                self._print(f"  Unknown: /{cmd}")
+                # Check if it's an addon command
+                addon_cmd = ADDON_MANAGER.get_command(cmd)
+                if addon_cmd:
+                    addon, handler, _ = addon_cmd
+                    try:
+                        # Run addon command - pass args and UI access
+                        await handler(args, self)
+                    except Exception as e:
+                        self._print(f"  ✗ Addon error: {e}")
+                else:
+                    self._print(f"  Unknown: /{cmd}")
         
         elif self.current_room:
             await self._send(line)
@@ -5346,6 +5821,12 @@ class PingNostrCLI:
         # Check for challenge-related messages (if not from ourselves)
         if sender.lower() != self.username.lower():
             self._handle_challenge_message(sender, fingerprint, text)
+        
+        # Dispatch to addons (they can handle game messages, etc.)
+        try:
+            ADDON_MANAGER.on_message(sender, text)
+        except Exception:
+            pass
         
         # Sound notification - check for mention first
         if self.username.lower() in text.lower():
@@ -5886,6 +6367,10 @@ class PingNostrCLI:
         self.active_challenge["my_dice"] = (die1, die2)
         
         self._print(f"  ⏳ Waiting for {challenger}'s roll...")
+        
+        # Check if opponent already rolled (race condition)
+        if self.active_challenge.get("opponent_roll") is not None:
+            await self._determine_winner()
     
     async def _decline(self):
         """Decline a dice challenge"""
@@ -5949,15 +6434,23 @@ class PingNostrCLI:
                     }
                     self.outgoing_challenge = None
                     self._print(f"\n  🎲 {accepter} accepted! Rolling dice...")
-                    # We need to roll - but this is sync context, schedule it
-                    import asyncio
-                    asyncio.create_task(self._do_challenge_roll())
+                    # Schedule our roll - use ensure_future for better compatibility
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            asyncio.ensure_future(self._do_challenge_roll())
+                        else:
+                            asyncio.create_task(self._do_challenge_roll())
+                    except Exception as e:
+                        if DEBUG:
+                            print(f"    [debug] Failed to schedule challenge roll: {e}")
             return True
         
-        # Check for duel roll - matches the new multi-line format with "Total: [x] + [y] = z"
-        duel_match = re.search(r'🎲⚔️ DUEL ROLL:', text)
+        # Check for duel roll - matches multi-line format with "Total: [x] + [y] = z"
+        # Accept both "🎲⚔️ DUEL ROLL:" and "🎲 rolled:" formats
+        is_roll_msg = '🎲⚔️ DUEL ROLL:' in text or '🎲 rolled:' in text
         total_match = re.search(r'Total: \[(\d)\] \+ \[(\d)\] = (\d+)', text)
-        if duel_match and total_match:
+        if is_roll_msg and total_match:
             die1 = int(total_match.group(1))
             die2 = int(total_match.group(2))
             total = int(total_match.group(3))
@@ -5967,11 +6460,19 @@ class PingNostrCLI:
                 if sender.lower() == opponent.lower():
                     self.active_challenge["opponent_roll"] = total
                     self.active_challenge["opponent_dice"] = (die1, die2)
+                    self._print(f"  🎲 {opponent} rolled {total}!")
                     
                     # Check if both rolls are in
-                    if self.active_challenge["my_roll"] is not None:
-                        import asyncio
-                        asyncio.create_task(self._determine_winner())
+                    if self.active_challenge.get("my_roll") is not None:
+                        try:
+                            loop = asyncio.get_event_loop()
+                            if loop.is_running():
+                                asyncio.ensure_future(self._determine_winner())
+                            else:
+                                asyncio.create_task(self._determine_winner())
+                        except Exception as e:
+                            if DEBUG:
+                                print(f"    [debug] Failed to determine winner: {e}")
             return True
         
         # Check for decline
@@ -5990,6 +6491,9 @@ class PingNostrCLI:
         if not self.active_challenge:
             return
         
+        # Small delay to ensure accept message is processed first
+        await asyncio.sleep(0.5)
+        
         # Do our roll with ASCII art broadcast
         die1, die2, total = await self._roll(broadcast=True, for_challenge=True)
         self.active_challenge["my_roll"] = total
@@ -5997,53 +6501,67 @@ class PingNostrCLI:
         self.active_challenge["i_am_challenger"] = True
         
         # Check if opponent already rolled
-        if self.active_challenge["opponent_roll"] is not None:
+        if self.active_challenge.get("opponent_roll") is not None:
             await self._determine_winner()
+        else:
+            opponent = self.active_challenge["opponent"]
+            self._print(f"  ⏳ Waiting for {opponent}'s roll...")
     
     async def _determine_winner(self):
         """Determine and announce the winner of a dice duel"""
         if not self.active_challenge:
             return
         
-        my_roll = self.active_challenge["my_roll"]
-        opponent_roll = self.active_challenge["opponent_roll"]
+        my_roll = self.active_challenge.get("my_roll")
+        opponent_roll = self.active_challenge.get("opponent_roll")
         opponent = self.active_challenge["opponent"]
         i_am_challenger = self.active_challenge.get("i_am_challenger", False)
+        my_dice = self.active_challenge.get("my_dice", (0, 0))
+        opponent_dice = self.active_challenge.get("opponent_dice", (0, 0))
+        
+        if my_roll is None or opponent_roll is None:
+            return  # Not ready yet
         
         # Determine winner
         if my_roll > opponent_roll:
             winner = self.username
             loser = opponent
+            winner_roll = my_roll
+            loser_roll = opponent_roll
             i_won = True
         elif opponent_roll > my_roll:
             winner = opponent
             loser = self.username
+            winner_roll = opponent_roll
+            loser_roll = my_roll
             i_won = False
         else:
             winner = None  # Tie
             i_won = None
         
-        # Display locally
-        self._print(f"\n  ╔══════════════════════════════════════════╗")
-        self._print(f"  ║           🎲 DUEL RESULTS 🎲              ║")
-        self._print(f"  ╠══════════════════════════════════════════╣")
+        # Display local results box
+        self._print("")
+        self._print("  ╔══════════════════════════════════════════╗")
+        self._print("  ║           🎲 DUEL RESULTS 🎲              ║")
+        self._print("  ╠══════════════════════════════════════════╣")
         self._print(f"  ║  {self.username:15} rolled: {my_roll:2}            ║")
         self._print(f"  ║  {opponent:15} rolled: {opponent_roll:2}            ║")
-        self._print(f"  ╠══════════════════════════════════════════╣")
+        self._print("  ╠══════════════════════════════════════════╣")
         
         if i_won is True:
-            self._print(f"  ║  🏆 YOU WIN! 🏆                          ║")
+            self._print("  ║        🏆 YOU WIN! 🏆                    ║")
         elif i_won is False:
-            self._print(f"  ║  💀 {opponent} wins!                    ║")
+            self._print(f"  ║        💀 {opponent:12} wins!          ║")
         else:
-            self._print(f"  ║  🤝 It's a TIE!                          ║")
+            self._print("  ║        🤝 It's a TIE!                    ║")
         
-        self._print(f"  ╚══════════════════════════════════════════╝\n")
+        self._print("  ╚══════════════════════════════════════════╝")
+        self._print("")
         
         # Only the challenger broadcasts the final result to avoid duplicates
         if i_am_challenger and self.client and self.current_room:
             if winner:
-                result_msg = f"🎲🏆 DUEL RESULT: {winner} defeats {loser}! ({my_roll if i_won else opponent_roll} vs {opponent_roll if i_won else my_roll})"
+                result_msg = f"🎲🏆 DUEL RESULT: {winner} defeats {loser}! ({winner_roll} vs {loser_roll})"
             else:
                 result_msg = f"🎲🤝 DUEL RESULT: It's a TIE between {self.username} and {opponent}! (Both rolled {my_roll})"
             
@@ -6454,6 +6972,23 @@ class PingNostrCLI:
             print()
             return
         
+        if args == 'addons':
+            # Only download/update addons
+            print(f"\n  Downloading official addons...")
+            print(f"  Target directory: {get_addons_dir()}")
+            downloaded, failed, errors = download_official_addons(verbose=True)
+            print()
+            if downloaded > 0:
+                print(f"  ✓ Downloaded {downloaded} addon(s)")
+            if failed > 0:
+                print(f"  ✗ Failed to download {failed} addon(s)")
+                for err in errors:
+                    print(f"    - {err}")
+            if downloaded > 0:
+                print("  Restart ping to load new addons.")
+            print()
+            return
+        
         print(f"\n  Current version: {APP_VERSION}")
         print(f"  Update URL: {UPDATE_URL}")
         print("  Checking for updates...")
@@ -6479,11 +7014,16 @@ class PingNostrCLI:
                 print("  ℹ️  You're running a newer version than the repository")
             else:
                 print("  ✓ You're up to date!")
+            
+            # Still offer to download addons
+            print(f"\n  Tip: Run '/update addons' to download/update official addons")
             print()
             return
         
         print(f"\n  ⬆️  Update available: {APP_VERSION} → {remote_version}")
         print(f"  Source: {UPDATE_URL}")
+        if OFFICIAL_ADDONS:
+            print(f"  Includes {len(OFFICIAL_ADDONS)} official addon(s)")
         
         if args == 'check':
             # Just checking, don't install
@@ -6503,7 +7043,7 @@ class PingNostrCLI:
                 return
         
         print("\n  Downloading and installing update...")
-        success, message = perform_update(remote_content)
+        success, message = perform_update(remote_content, include_addons=True)
         
         if success:
             print(f"  ✓ {message}")
