@@ -48,6 +48,30 @@ try:
 except ImportError:
     HAS_AIOHTTP = False
 
+def _get_ssl_context():
+    """Get best available SSL context (fixes macOS certificate issues)."""
+    import ssl as _ssl
+    # Method 1: certifi (most reliable on macOS)
+    try:
+        import certifi
+        return _ssl.create_default_context(cafile=certifi.where())
+    except (ImportError, Exception):
+        pass
+    # Method 2: default system certs
+    try:
+        return _ssl.create_default_context()
+    except Exception:
+        pass
+    # Method 3: unverified (last resort)
+    ctx = _ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = _ssl.CERT_NONE
+    return ctx
+
+def _get_tcp_connector():
+    """Get aiohttp TCPConnector with proper SSL context."""
+    return aiohttp.TCPConnector(ssl=_get_ssl_context())
+
 try:
     import curses
     HAS_CURSES = True
@@ -58,7 +82,7 @@ except ImportError:
 if 'PingAddon' not in dir():
     class PingAddon:
         name = "Base"
-        version = "1.0.0"
+        version = "1.0.1"
         description = ""
         commands = {}
         def __init__(self): self.cli = None
@@ -498,7 +522,7 @@ def options_dialog(filename: str, filesize: int, stdscr=None) -> Optional[ShareO
 async def upload_file(server: str, data: bytes) -> Tuple[Optional[str], Optional[str]]:
     """Upload encrypted blob. Returns (url, error)."""
     try:
-        async with aiohttp.ClientSession() as s:
+        async with aiohttp.ClientSession(connector=_get_tcp_connector()) as s:
             async with s.post(
                 f"{server.rstrip('/')}/api/upload",
                 data=data,
@@ -515,7 +539,7 @@ async def upload_file(server: str, data: bytes) -> Tuple[Optional[str], Optional
 async def create_link(server: str, file_url: str, expires_sec: int, max_dl: int, hard_delete: bool) -> Tuple[Optional[str], Optional[str]]:
     """Create share link. Returns (url, error)."""
     try:
-        async with aiohttp.ClientSession() as s:
+        async with aiohttp.ClientSession(connector=_get_tcp_connector()) as s:
             async with s.post(
                 f"{server.rstrip('/')}/api/links",
                 json={"fileUrl": file_url, "expiresInSeconds": expires_sec, "maxDownloads": max_dl, "hardDelete": hard_delete},
@@ -761,7 +785,7 @@ class SendAddon(PingAddon):
         # Shorten the share URL
         cli._print(f"  Creating short link...")
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=_get_tcp_connector()) as session:
                 async with session.post(
                     f"{self.config.server_url.rstrip('/')}/api/shorten",
                     json={
@@ -864,7 +888,7 @@ class SendAddon(PingAddon):
         
         # Call the dedicated shorten API
         try:
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(connector=_get_tcp_connector()) as session:
                 payload = {
                     "targetUrl": url,
                     "expiresInSeconds": expiry_seconds,
@@ -943,7 +967,7 @@ async def standalone_send(filepath: Path, server_url: str, opts: ShareOptions) -
     # Try to shorten
     print(f"  Creating short link...")
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=_get_tcp_connector()) as session:
             async with session.post(
                 f"{server_url.rstrip('/')}/api/shorten",
                 json={"targetUrl": share_url, "expiresInSeconds": exp_seconds},
@@ -980,7 +1004,7 @@ async def standalone_shorten(url: str, server_url: str, expiry_code: str = "7d",
             break
     
     try:
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(connector=_get_tcp_connector()) as session:
             payload = {"targetUrl": url, "expiresInSeconds": expiry_seconds}
             if password:
                 payload["password"] = password
