@@ -236,7 +236,7 @@ def schnorr_verify(msg: bytes, pubkey: bytes, sig: bytes) -> bool:
 # ==============================================================================
 # Constants
 # ==============================================================================
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.2.3"
 APP_ID = "ping-e2e-v1"
 DEBUG = False  # Set via --debug flag
 LEGACY_MODE = False  # Legacy mode for old client compatibility (--legacy)
@@ -256,7 +256,7 @@ UPDATE_CHECK_URL = UPDATE_URL  # Same URL, we'll check version from content
 OFFICIAL_ADDONS = [
     ("charts.py", "https://raw.githubusercontent.com/attacless/ping/main/addons/charts.py"),
     ("weather.py", "https://raw.githubusercontent.com/attacless/ping/main/addons/weather.py"),
-    ("pong.py", "https://raw.githubusercontent.com/attacless/ping/main/addons/pong.py"),
+    ("manuscrypt.py", "https://raw.githubusercontent.com/attacless/ping/main/addons/manuscrypt.py"),
 ]
 
 # Public Nostr relays (decentralized!) - free, no signup required
@@ -2182,6 +2182,9 @@ def fetch_addon(url: str) -> tuple[Optional[str], Optional[str]]:
     import urllib.request
     import ssl
     
+    errors = []
+    
+    # Method 1: Try with default SSL context
     try:
         ctx = ssl.create_default_context()
         req = urllib.request.Request(
@@ -2191,7 +2194,41 @@ def fetch_addon(url: str) -> tuple[Optional[str], Optional[str]]:
         with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
             return response.read().decode('utf-8'), None
     except Exception as e:
-        return None, str(e)
+        errors.append(f"SSL context: {e}")
+    
+    # Method 2: Try with certifi if available (fixes macOS/iOS)
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        req = urllib.request.Request(
+            url,
+            headers={'User-Agent': f'PingNostr/{APP_VERSION}'}
+        )
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
+            return response.read().decode('utf-8'), None
+    except ImportError:
+        errors.append("certifi not installed")
+    except Exception as e:
+        errors.append(f"certifi: {e}")
+    
+    # Method 3: Unverified context as last resort
+    try:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        req = urllib.request.Request(
+            url,
+            headers={'User-Agent': f'PingNostr/{APP_VERSION}'}
+        )
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
+            return response.read().decode('utf-8'), None
+    except Exception as e:
+        errors.append(f"unverified: {e}")
+    
+    error_msg = "; ".join(errors)
+    if DEBUG:
+        print(f"    [debug] All addon fetch methods failed: {error_msg}")
+    return None, error_msg
 
 def get_addons_dir() -> Path:
     """Get the addons directory (next to script, or in data dir)."""
