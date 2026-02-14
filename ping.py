@@ -236,7 +236,7 @@ def schnorr_verify(msg: bytes, pubkey: bytes, sig: bytes) -> bool:
 # ==============================================================================
 # Constants
 # ==============================================================================
-APP_VERSION = "1.2.3"
+APP_VERSION = "1.2.4"
 APP_ID = "ping-e2e-v1"
 DEBUG = False  # Set via --debug flag
 LEGACY_MODE = False  # Legacy mode for old client compatibility (--legacy)
@@ -250,6 +250,13 @@ CURRENT_FG = None  # Current foreground color
 # Repository must be public for auto-update to work
 UPDATE_URL = "https://raw.githubusercontent.com/attacless/ping/main/ping.py"
 UPDATE_CHECK_URL = UPDATE_URL  # Same URL, we'll check version from content
+UPDATE_SIG_URL = UPDATE_URL + ".minisig"  # Signature file
+
+# Minisign public key for verifying updates
+MINISIGN_PUBKEY = """untrusted comment: minisign public key 1E51870F505442C5
+RWTFQlRQD4dRHn1QXg8UKVezq30mYpbrfGd4/D5wKG8iYSP3l4+SLd5P"""
+# Set to True once you've added your real public key
+MINISIGN_ENABLED = True
 
 # Official addons to download during updates
 # Format: (filename, raw_github_url)
@@ -2138,25 +2145,106 @@ def fetch_remote_script() -> tuple[Optional[str], Optional[str]]:
     except Exception as e:
         errors.append(f"certifi: {e}")
     
-    # Method 3: Try with unverified context (less secure, but works)
+    # No insecure fallback - fail safely with helpful message
+    error_msg = "; ".join(errors)
+    fix_msg = "\n  Fix: pip install --upgrade certifi"
+    if DEBUG:
+        print(f"    [debug] All fetch methods failed: {error_msg}")
+    return None, f"TLS verification failed. {fix_msg}"
+
+def fetch_signature() -> tuple[Optional[str], Optional[str]]:
+    """Fetch the minisign signature for ping.py. Returns (signature, error)."""
+    import urllib.request
+    import ssl
+    
+    # Try with certifi first (most reliable on macOS)
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        req = urllib.request.Request(
+            UPDATE_SIG_URL,
+            headers={'User-Agent': f'PingNostr/{APP_VERSION}'}
+        )
+        with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
+            return response.read().decode('utf-8'), None
+    except ImportError:
+        pass
+    except Exception as e:
+        if DEBUG:
+            print(f"    [debug] Signature fetch with certifi failed: {e}")
+    
+    # Fallback to default SSL
     try:
         ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
         req = urllib.request.Request(
-            UPDATE_URL,
+            UPDATE_SIG_URL,
             headers={'User-Agent': f'PingNostr/{APP_VERSION}'}
         )
         with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
             return response.read().decode('utf-8'), None
     except Exception as e:
-        errors.append(f"unverified: {e}")
+        return None, f"Failed to fetch signature: {e}"
+
+def verify_minisign(content: str, signature: str) -> tuple[bool, str]:
+    """
+    Verify minisign signature using the minisign CLI tool.
+    Returns (success, message).
+    """
+    import subprocess
+    import tempfile
+    import os
     
-    # All methods failed
-    error_msg = "; ".join(errors)
-    if DEBUG:
-        print(f"    [debug] All fetch methods failed: {error_msg}")
-    return None, error_msg
+    if not MINISIGN_ENABLED:
+        return True, "Signature verification skipped (not configured)"
+    
+    # Check if minisign is installed
+    try:
+        result = subprocess.run(
+            ["minisign", "-v"],
+            capture_output=True,
+            timeout=5
+        )
+    except FileNotFoundError:
+        return False, "minisign not installed. Install: brew install minisign"
+    except Exception as e:
+        return False, f"minisign check failed: {e}"
+    
+    # Write temp files for verification
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            f.write(content)
+            content_path = f.name
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.minisig', delete=False) as f:
+            f.write(signature)
+            sig_path = f.name
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.pub', delete=False) as f:
+            f.write(MINISIGN_PUBKEY)
+            pub_path = f.name
+        
+        # Run verification
+        result = subprocess.run(
+            ["minisign", "-Vm", content_path, "-x", sig_path, "-p", pub_path],
+            capture_output=True,
+            timeout=10
+        )
+        
+        # Cleanup
+        for path in [content_path, sig_path, pub_path]:
+            try:
+                os.unlink(path)
+            except:
+                pass
+        
+        if result.returncode == 0:
+            return True, "Signature verified"
+        else:
+            error = result.stderr.decode() if result.stderr else "Unknown error"
+            return False, f"Signature verification failed: {error}"
+    
+    except Exception as e:
+        return False, f"Verification error: {e}"
 
 def check_for_updates() -> tuple[bool, Optional[str], Optional[str], Optional[str]]:
     """Check if updates are available. Returns (update_available, remote_version, remote_content, error)"""
@@ -2211,24 +2299,11 @@ def fetch_addon(url: str) -> tuple[Optional[str], Optional[str]]:
     except Exception as e:
         errors.append(f"certifi: {e}")
     
-    # Method 3: Unverified context as last resort
-    try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        req = urllib.request.Request(
-            url,
-            headers={'User-Agent': f'PingNostr/{APP_VERSION}'}
-        )
-        with urllib.request.urlopen(req, timeout=15, context=ctx) as response:
-            return response.read().decode('utf-8'), None
-    except Exception as e:
-        errors.append(f"unverified: {e}")
-    
+    # No insecure fallback - fail safely
     error_msg = "; ".join(errors)
     if DEBUG:
         print(f"    [debug] All addon fetch methods failed: {error_msg}")
-    return None, error_msg
+    return None, f"TLS verification failed. Fix: pip install --upgrade certifi"
 
 def get_addons_dir() -> Path:
     """Get the addons directory (next to script, or in data dir)."""
@@ -2300,9 +2375,22 @@ def download_official_addons(verbose: bool = True) -> tuple[int, int, list[str]]
 def perform_update(new_content: str, include_addons: bool = True) -> tuple[bool, str]:
     """
     Update the script file with new content.
+    Verifies minisign signature if enabled.
     Optionally also downloads official addons.
     Returns (success, message)
     """
+    # Verify signature before applying update
+    if MINISIGN_ENABLED:
+        print("  Verifying signature...")
+        signature, sig_error = fetch_signature()
+        if not signature:
+            return False, f"Could not fetch signature: {sig_error}"
+        
+        verified, verify_msg = verify_minisign(new_content, signature)
+        if not verified:
+            return False, f"⚠️  SECURITY: {verify_msg}\n  Update rejected. The file may have been tampered with."
+        print(f"  ✓ {verify_msg}")
+    
     script_path = get_script_path()
     backup_path = script_path.with_suffix('.py.backup')
     
